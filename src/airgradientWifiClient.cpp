@@ -9,6 +9,7 @@
 #ifndef ESP8266
 
 #include "airgradientWifiClient.h"
+#include "agLogger.h"
 
 #include <HTTPClient.h>
 
@@ -19,7 +20,7 @@ bool AirgradientWifiClient::begin(std::string sn) {
 
 std::string AirgradientWifiClient::httpFetchConfig() {
   std::string url = buildFetchConfigUrl(true);
-  Serial.printf("Fetch configuration from %s\n", url.c_str());
+  AG_LOGI(TAG, "Fetch configuration from %s", url.c_str());
 
   // Init http client
   HTTPClient client;
@@ -27,7 +28,7 @@ std::string AirgradientWifiClient::httpFetchConfig() {
   client.setTimeout(timeoutMs);        // Timeout when waiting for response from AG server
   // By default, airgradient using https
   if (client.begin(String(url.c_str()), AG_SERVER_ROOT_CA) == false) {
-    Serial.println("ERROR begin HTTPClient using TLS");
+    AG_LOGE(TAG, "Failed begin HTTPClient using TLS");
     lastFetchConfigSucceed = false;
     return {};
   }
@@ -36,7 +37,7 @@ std::string AirgradientWifiClient::httpFetchConfig() {
   int statusCode = client.GET();
   if (statusCode != 200) {
     client.end();
-    Serial.printf("Failed fetch configuration from server with return code %d\n");
+    AG_LOGE(TAG, "Failed fetch configuration from server with return code %d", statusCode);
     // Return code 400 means device not registered on ag server
     if (statusCode == 400) {
       registeredOnAgServer = false;
@@ -50,7 +51,7 @@ std::string AirgradientWifiClient::httpFetchConfig() {
   client.end();
 
   if (responseBody.empty()) {
-    Serial.println("Success fetch configuration from server but somehow body is empty");
+    AG_LOGW(TAG, "Success fetch configuration from server but somehow body is empty");
     lastFetchConfigSucceed = false;
     return responseBody;
   }
@@ -58,20 +59,20 @@ std::string AirgradientWifiClient::httpFetchConfig() {
   // Set success state flag
   registeredOnAgServer = true;
   lastFetchConfigSucceed = true;
-  Serial.println("Success fetch configuration from server, still needs to be parsed and validated");
+  AG_LOGI(TAG, "Success fetch configuration from server, still needs to be parsed and validated");
 
   return responseBody;
 }
 bool AirgradientWifiClient::httpPostMeasures(const std::string &payload) {
   std::string url = buildPostMeasuresUrl(true);
-  Serial.printf("Post measures to %s\n", url.c_str());
+  AG_LOGI(TAG, "Post measures to %s", url.c_str());
 
   HTTPClient client;
   client.setConnectTimeout(timeoutMs); // Set timeout when establishing connection to server
   client.setTimeout(timeoutMs);        // Timeout when waiting for response from AG server
   // By default, airgradient using https
   if (client.begin(String(url.c_str()), AG_SERVER_ROOT_CA) == false) {
-    Serial.println("ERROR begin HTTPClient using TLS");
+    AG_LOGE(TAG, "Failed begin HTTPClient using TLS");
     lastPostMeasuresSucceed = false;
     return false;
   }
@@ -81,13 +82,13 @@ bool AirgradientWifiClient::httpPostMeasures(const std::string &payload) {
   client.end();
 
   if ((statusCode != 200) && (statusCode != 429)) {
-    Serial.printf("Failed post measures to server with response code %d\n", statusCode);
+    AG_LOGE(TAG, "Failed post measures to server with response code %d", statusCode);
     lastPostMeasuresSucceed = false;
     return false;
   }
 
   lastPostMeasuresSucceed = true;
-  Serial.printf("Success post measures to server with response code %d\n", statusCode);
+  AG_LOGI(TAG, "Success post measures to server with response code %d", statusCode);
 
   return true;
 }

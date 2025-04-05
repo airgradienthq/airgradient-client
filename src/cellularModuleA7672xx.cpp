@@ -7,13 +7,16 @@
 
 #ifndef ESP8266
 
+#include <cstdint>
+#include <memory>
+
+#include "common.h"
+#include "agLogger.h"
+#include "agSerial.h"
 #include "cellularModuleA7672xx.h"
 #include "cellularModule.h"
 #include "atCommandHandler.h"
 #include "cellularModule.h"
-#include "common.h"
-#include <cstdint>
-#include <memory>
 
 #define REGIS_RETRY_DELAY() DELAY_MS(1000);
 
@@ -33,7 +36,7 @@ CellularModuleA7672XX::~CellularModuleA7672XX() {
 
 bool CellularModuleA7672XX::init() {
   if (_initialized) {
-    ESP_LOGI(TAG, "Already initialized");
+    AG_LOGI(TAG, "Already initialized");
     return true;
   }
 
@@ -49,9 +52,9 @@ bool CellularModuleA7672XX::init() {
 
   // Initialize cellular module and wait for module to ready
   at_ = new ATCommandHandler(agSerial_);
-  ESP_LOGI(TAG, "Checking module readiness...");
+  AG_LOGI(TAG, "Checking module readiness...");
   if (!at_->testAT()) {
-    ESP_LOGW(TAG, "Failed wait cellular module to ready");
+    AG_LOGW(TAG, "Failed wait cellular module to ready");
     delete at_;
     return false;
   }
@@ -90,24 +93,24 @@ void CellularModuleA7672XX::powerOff() {
   at_->sendAT("+CPOF");
   if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
     // Force power off
-    ESP_LOGW(TAG, "Force module to power off");
+    AG_LOGW(TAG, "Force module to power off");
     gpio_set_level(_powerIO, 1);
     DELAY_MS(1300);
     gpio_set_level(_powerIO, 0);
     return;
   }
 
-  ESP_LOGI(TAG, "Module powered off");
+  AG_LOGI(TAG, "Module powered off");
 }
 
 bool CellularModuleA7672XX::reset() {
   at_->sendAT("+CRESET");
   if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
-    ESP_LOGW(TAG, "Failed reset module");
+    AG_LOGW(TAG, "Failed reset module");
     return false;
   }
 
-  ESP_LOGI(TAG, "Success reset module");
+  AG_LOGI(TAG, "Success reset module");
   return true;
 }
 
@@ -263,7 +266,7 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
   NetworkRegistrationState state = CHECK_MODULE_READY;
   bool finish = false;
 
-  ESP_LOGI(TAG, "Start operation network registration");
+  AG_LOGI(TAG, "Start operation network registration");
   while ((MILLIS() - startOperationTime) < operationTimeoutMs && !finish) {
     switch (state) {
     case CHECK_MODULE_READY:
@@ -324,7 +327,7 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
   }
 
   if (!finish) {
-    ESP_LOGW(TAG, "Register to network operation timeout!");
+    AG_LOGW(TAG, "Register to network operation timeout!");
     return result;
   }
 
@@ -333,14 +336,14 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
 }
 
 CellReturnStatus CellularModuleA7672XX::reinitialize() {
-  ESP_LOGI(TAG, "Power cycling module");
+  AG_LOGI(TAG, "Power cycling module");
   powerOff();
   DELAY_MS(1000);
   powerOn();
 
-  ESP_LOGI(TAG, "Initialize module");
+  AG_LOGI(TAG, "Initialize module");
   if (!at_->testAT()) {
-    ESP_LOGW(TAG, "Failed wait cellular module to ready");
+    AG_LOGW(TAG, "Failed wait cellular module to ready");
     return CellReturnStatus::Error;
   }
 
@@ -396,7 +399,7 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
     return result;
   }
 
-  ESP_LOGI(TAG, "HTTP response code %d with body len: %d. Retrieving response body...", statusCode,
+  AG_LOGI(TAG, "HTTP response code %d with body len: %d. Retrieving response body...", statusCode,
            bodyLen);
 
   uint32_t retrieveStartTime = MILLIS();
@@ -418,16 +421,16 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
       at_->sendAT(buf);
       response = at_->waitResponse("+HTTPREAD:"); // Wait for first +HTTPREAD, skip the OK
       if (response == ATCommandHandler::Timeout) {
-        ESP_LOGW(TAG, "Timeout wait response +HTTPREAD");
+        AG_LOGW(TAG, "Timeout wait response +HTTPREAD");
         break;
       } else if (response == ATCommandHandler::ExpArg2) {
-        ESP_LOGW(TAG, "Error execute HTTPREAD");
+        AG_LOGW(TAG, "Error execute HTTPREAD");
         break;
       }
 
       // Get first +HTTPREAD value
       if (at_->waitAndRecvRespLine(buf, HTTPREAD_CHUNK_SIZE) == -1) {
-        ESP_LOGW(TAG, "Failed retrieve +HTTPREAD value length");
+        AG_LOGW(TAG, "Failed retrieve +HTTPREAD value length");
         break;
       }
       receivedBufferLen = std::stoi(buf);
@@ -437,13 +440,13 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
       int receivedActual = at_->retrieveBuffer(buf, receivedBufferLen);
       if (receivedActual != receivedBufferLen) {
         // Size received not the same as expected, handle better
-        ESP_LOGE(TAG, "receivedBufferLen: %d | receivedActual: %d", receivedBufferLen,
+        AG_LOGE(TAG, "receivedBufferLen: %d | receivedActual: %d", receivedBufferLen,
                  receivedActual);
         break;
       }
       at_->clearBuffer();
 
-      ESP_LOGV(TAG, "Received body len from buffer: %d", receivedBufferLen);
+      AG_LOGV(TAG, "Received body len from buffer: %d", receivedBufferLen);
 
       // Append response body chunk to result
       memcpy(bodyResponse + offset, buf, receivedBufferLen);
@@ -455,14 +458,14 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
 
     // Check if all response body data received
     if (offset < bodyLen) {
-      ESP_LOGE(TAG, "Failed to retrieve all response body data from module");
+      AG_LOGE(TAG, "Failed to retrieve all response body data from module");
       _httpTerminate();
       delete[] bodyResponse;
       return result;
     }
   }
 
-  ESP_LOGD(TAG, "Finish retrieve response body from module buffer in %.2fs",
+  AG_LOGD(TAG, "Finish retrieve response body from module buffer in %.2fs",
            ((float)MILLIS() - retrieveStartTime) / 1000);
 
   // set status code and response body for return function
@@ -481,7 +484,7 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
   }
 
   _httpTerminate();
-  ESP_LOGI(TAG, "httpGet() finish");
+  AG_LOGI(TAG, "httpGet() finish");
 
   result.status = CellReturnStatus::Ok;
   return result;
@@ -519,12 +522,12 @@ CellularModuleA7672XX::httpPost(const std::string &url, const std::string &body,
     at_->sendAT(buffer);
     response = at_->waitResponse();
     if (response == ATCommandHandler::Timeout) {
-      ESP_LOGW(TAG, "Timeout wait response +HTTPPARA CONTENT");
+      AG_LOGW(TAG, "Timeout wait response +HTTPPARA CONTENT");
       _httpTerminate();
       result.status = CellReturnStatus::Timeout;
       return result;
     } else if (response == ATCommandHandler::ExpArg2) {
-      ESP_LOGW(TAG, "Error set HTTP param CONTENT");
+      AG_LOGW(TAG, "Error set HTTP param CONTENT");
       _httpTerminate();
       result.status = CellReturnStatus::Error;
       return result;
@@ -546,19 +549,19 @@ CellularModuleA7672XX::httpPost(const std::string &url, const std::string &body,
   at_->sendAT(buf);
   if (at_->waitResponse("DOWNLOAD") != ATCommandHandler::ExpArg1) {
     // Either timeout wait for expected response or return ERROR
-    ESP_LOGW(TAG, "Error +HTTPDATA wait for \"DOWNLOAD\" response");
+    AG_LOGW(TAG, "Error +HTTPDATA wait for \"DOWNLOAD\" response");
     _httpTerminate();
     result.status = CellReturnStatus::Error;
     return result;
   }
 
-  ESP_LOGI(TAG, "Receive \"DOWNLOAD\" event, adding request body");
+  AG_LOGI(TAG, "Receive \"DOWNLOAD\" event, adding request body");
   at_->sendRaw(body.c_str());
   // Wait for 'OK' after send request body
   // Timeout set based on +HTTPDATA param
   if (at_->waitResponse(10000) != ATCommandHandler::ExpArg1) {
     // Timeout wait "OK"
-    ESP_LOGW(TAG, "Error +HTTPDATA wait for \"DOWNLOAD\" response");
+    AG_LOGW(TAG, "Error +HTTPDATA wait for \"DOWNLOAD\" response");
     _httpTerminate();
     result.status = CellReturnStatus::Error;
     return result;
@@ -574,14 +577,14 @@ CellularModuleA7672XX::httpPost(const std::string &url, const std::string &body,
     return result;
   }
 
-  ESP_LOGI(TAG, "HTTP response code %d with body len: %d", statusCode, bodyLen);
+  AG_LOGI(TAG, "HTTP response code %d with body len: %d", statusCode, bodyLen);
 
   // set status code, and ignore response body
   result.data.statusCode = statusCode;
   // TODO: In the future retrieve the response body
 
   _httpTerminate();
-  ESP_LOGI(TAG, "httpPost() finish");
+  AG_LOGI(TAG, "httpPost() finish");
 
   result.status = CellReturnStatus::Ok;
   return result;
@@ -596,7 +599,7 @@ CellReturnStatus CellularModuleA7672XX::mqttConnect(const std::string &clientId,
   at_->sendAT("+CMQTTSTART");
   auto atResult = at_->waitResponse(12000, "+CMQTTSTART:");
   if (atResult == ATCommandHandler::Timeout || atResult == ATCommandHandler::CMxError) {
-    ESP_LOGW(TAG, "Timeout wait for +CMQTTSTART response");
+    AG_LOGW(TAG, "Timeout wait for +CMQTTSTART response");
     return CellReturnStatus::Timeout;
   } else if (atResult == ATCommandHandler::ExpArg1) {
     // +CMQTTSTART response received as arg1
@@ -606,14 +609,14 @@ CellReturnStatus CellularModuleA7672XX::mqttConnect(const std::string &clientId,
     }
     if (result != "0") {
       // Failed to start
-      ESP_LOGE(TAG, "CMQTTSTART failed with value %s", result.c_str());
+      AG_LOGE(TAG, "CMQTTSTART failed with value %s", result.c_str());
       return CellReturnStatus::Error;
     }
     // CMQTTSTART ok
   } else if (atResult == ATCommandHandler::ExpArg2) {
     // Here it return error, but based on the document module MQTT context already started
     // Do nothing
-    ESP_LOGI(TAG, "+CMQTTSTART return error, which means mqtt context already started");
+    AG_LOGI(TAG, "+CMQTTSTART return error, which means mqtt context already started");
   }
 
   // +CMQTTACCQ
@@ -642,7 +645,7 @@ CellReturnStatus CellularModuleA7672XX::mqttConnect(const std::string &clientId,
 
   // If result not 0, then error occur
   if (result != "0") {
-    ESP_LOGE(TAG, "+CMQTTCONNECT error result: %s", result.c_str());
+    AG_LOGE(TAG, "+CMQTTCONNECT error result: %s", result.c_str());
     return CellReturnStatus::Error;
   }
   at_->clearBuffer();
@@ -666,7 +669,7 @@ CellReturnStatus CellularModuleA7672XX::mqttDisconnect() {
   }
 
   if (result != "0") {
-    ESP_LOGE(TAG, "+CMQTTDISC error result: %s", result.c_str());
+    AG_LOGE(TAG, "+CMQTTDISC error result: %s", result.c_str());
     return CellReturnStatus::Error;
   }
   at_->clearBuffer();
@@ -703,16 +706,16 @@ CellReturnStatus CellularModuleA7672XX::mqttPublish(const std::string &topic,
   at_->sendAT(buf);
   if (at_->waitResponse(">") != ATCommandHandler::ExpArg1) {
     // Either timeout wait for expected response or return ERROR
-    ESP_LOGW(TAG, "Error +CMQTTTOPIC wait for \">\" response");
+    AG_LOGW(TAG, "Error +CMQTTTOPIC wait for \">\" response");
     return CellReturnStatus::Error;
   }
 
-  ESP_LOGI(TAG, "Receive \">\" event, adding topic");
+  AG_LOGI(TAG, "Receive \">\" event, adding topic");
   at_->sendRaw(topic.c_str());
   // Wait for 'OK' after send topic
   if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
     // Timeout wait "OK"
-    ESP_LOGW(TAG, "Error +CMQTTTOPIC wait for \"OK\" response");
+    AG_LOGW(TAG, "Error +CMQTTTOPIC wait for \"OK\" response");
     return CellReturnStatus::Error;
   }
 
@@ -722,16 +725,16 @@ CellReturnStatus CellularModuleA7672XX::mqttPublish(const std::string &topic,
   at_->sendAT(buf);
   if (at_->waitResponse(">") != ATCommandHandler::ExpArg1) {
     // Either timeout wait for expected response or return ERROR
-    ESP_LOGW(TAG, "Error +CMQTTPAYLOAD wait for \">\" response");
+    AG_LOGW(TAG, "Error +CMQTTPAYLOAD wait for \">\" response");
     return CellReturnStatus::Error;
   }
 
-  ESP_LOGI(TAG, "Receive \">\" event, adding payload");
+  AG_LOGI(TAG, "Receive \">\" event, adding payload");
   at_->sendRaw(payload.c_str());
   // Wait for 'OK' after send payload
   if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
     // Timeout wait "OK"
-    ESP_LOGW(TAG, "Error +CMQTTPAYLOAD wait for \"OK\" response");
+    AG_LOGW(TAG, "Error +CMQTTPAYLOAD wait for \"OK\" response");
     return CellReturnStatus::Error;
   }
 
@@ -740,18 +743,18 @@ CellReturnStatus CellularModuleA7672XX::mqttPublish(const std::string &topic,
   int timeoutMs = timeoutS * 1000;
   at_->sendAT(buf);
   if (at_->waitResponse(timeoutMs, "+CMQTTPUB: 0,") != ATCommandHandler::ExpArg1) {
-    ESP_LOGW(TAG, "+CMQTTPUBLISH error");
+    AG_LOGW(TAG, "+CMQTTPUBLISH error");
     return CellReturnStatus::Error;
   }
 
   // Retrieve the value
   if (at_->waitAndRecvRespLine(result) == -1) {
-    ESP_LOGW(TAG, "+CMQTTPUB retrieve value timeout");
+    AG_LOGW(TAG, "+CMQTTPUB retrieve value timeout");
     return CellReturnStatus::Timeout;
   }
 
   if (result != "0") {
-    ESP_LOGE(TAG, "Failed +CMQTTPUB with value %s", result.c_str());
+    AG_LOGE(TAG, "Failed +CMQTTPUB with value %s", result.c_str());
     return CellReturnStatus::Error;
   }
 
@@ -772,7 +775,7 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implChec
     return CHECK_MODULE_READY;
   }
 
-  ESP_LOGI(TAG, "Continue: PREPARE_REGISTRATION");
+  AG_LOGI(TAG, "Continue: PREPARE_REGISTRATION");
   return PREPARE_REGISTRATION;
 }
 
@@ -781,7 +784,7 @@ CellularModuleA7672XX::_implPrepareRegistration(CellTechnology ct) {
   // TODO: Check result
   _disableNetworkRegistrationURC(ct);
   _applyCellularTechnology(ct);
-  ESP_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
+  AG_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
   return CHECK_NETWORK_REGISTRATION;
 }
 
@@ -807,7 +810,7 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct) {
     return CHECK_NETWORK_REGISTRATION;
   }
 
-  ESP_LOGI(TAG, "Continue: ENSURE_SERVICE_READY");
+  AG_LOGI(TAG, "Continue: ENSURE_SERVICE_READY");
   return ENSURE_SERVICE_READY;
 }
 
@@ -821,7 +824,7 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implEnsu
     return ENSURE_SERVICE_READY;
   }
 
-  ESP_LOGI(TAG, "Continue: NETWORK_REGISTERED");
+  AG_LOGI(TAG, "Continue: NETWORK_REGISTERED");
   return NETWORK_REGISTERED;
 }
 
@@ -832,7 +835,7 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implConf
     return CHECK_MODULE_READY;
   }
 
-  ESP_LOGI(TAG, "Cellular signal: %d", result.data);
+  AG_LOGI(TAG, "Cellular signal: %d", result.data);
 
   CellReturnStatus crs = _checkOperatorSelection();
   if (crs == CellReturnStatus::Timeout) {
@@ -851,7 +854,7 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implConf
     // TODO: What's next if this return error?
   }
 
-  ESP_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
+  AG_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
   return CHECK_NETWORK_REGISTRATION;
 }
 
@@ -881,7 +884,7 @@ CellularModuleA7672XX::_implConfigureService(const std::string &apn) {
     // TODO: What's next if this return error?
   }
 
-  ESP_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
+  AG_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
   return CHECK_NETWORK_REGISTRATION;
 }
 
@@ -899,7 +902,7 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implNetw
   }
 
   // print signal
-  ESP_LOGI(TAG, "Signal ready at: %d", result.data);
+  AG_LOGI(TAG, "Signal ready at: %d", result.data);
 
   CellResult<std::string> resultIP = retrieveIPAddr();
   if (resultIP.data.empty()) {
@@ -907,8 +910,8 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implNetw
     return ENSURE_SERVICE_READY;
   }
 
-  ESP_LOGI(TAG, "IP Addr: %s", resultIP.data.c_str());
-  ESP_LOGI(TAG, "Continue: finish");
+  AG_LOGI(TAG, "IP Addr: %s", resultIP.data.c_str());
+  AG_LOGI(TAG, "Continue: finish");
   return NETWORK_REGISTERED;
 }
 
@@ -1046,10 +1049,10 @@ CellReturnStatus CellularModuleA7672XX::_httpInit() {
   at_->sendAT("+HTTPINIT");
   auto response = at_->waitResponse();
   if (response == ATCommandHandler::Timeout) {
-    ESP_LOGW(TAG, "Timeout wait response +HTTPINIT");
+    AG_LOGW(TAG, "Timeout wait response +HTTPINIT");
     return CellReturnStatus::Timeout;
   } else if (response == ATCommandHandler::ExpArg2) {
-    ESP_LOGW(TAG, "Error initialize module HTTP service");
+    AG_LOGW(TAG, "Error initialize module HTTP service");
     return CellReturnStatus::Error;
   }
 
@@ -1083,10 +1086,10 @@ CellReturnStatus CellularModuleA7672XX::_httpSetParamTimeout(int connectionTimeo
     at_->sendAT(cmd.c_str());
     auto response = at_->waitResponse();
     if (response == ATCommandHandler::Timeout) {
-      ESP_LOGW(TAG, "Timeout wait response +HTTPPARA CONNECTTO");
+      AG_LOGW(TAG, "Timeout wait response +HTTPPARA CONNECTTO");
       return CellReturnStatus::Timeout;
     } else if (response == ATCommandHandler::ExpArg2) {
-      ESP_LOGW(TAG, "Error set HTTP param CONNECTTO");
+      AG_LOGW(TAG, "Error set HTTP param CONNECTTO");
       return CellReturnStatus::Error;
     }
   }
@@ -1098,10 +1101,10 @@ CellReturnStatus CellularModuleA7672XX::_httpSetParamTimeout(int connectionTimeo
     at_->sendAT(cmd.c_str());
     auto response = at_->waitResponse();
     if (response == ATCommandHandler::Timeout) {
-      ESP_LOGW(TAG, "Timeout wait response +HTTPPARA RECVTO");
+      AG_LOGW(TAG, "Timeout wait response +HTTPPARA RECVTO");
       return CellReturnStatus::Timeout;
     } else if (response == ATCommandHandler::ExpArg2) {
-      ESP_LOGW(TAG, "Error set HTTP param RECVTO");
+      AG_LOGW(TAG, "Error set HTTP param RECVTO");
       return CellReturnStatus::Error;
     }
   }
@@ -1115,10 +1118,10 @@ CellReturnStatus CellularModuleA7672XX::_httpSetUrl(const std::string &url) {
   at_->sendAT(buf);
   auto response = at_->waitResponse();
   if (response == ATCommandHandler::Timeout) {
-    ESP_LOGW(TAG, "Timeout wait response +HTTPPARA URL");
+    AG_LOGW(TAG, "Timeout wait response +HTTPPARA URL");
     return CellReturnStatus::Timeout;
   } else if (response == ATCommandHandler::ExpArg2) {
-    ESP_LOGW(TAG, "Error set HTTP param URL");
+    AG_LOGW(TAG, "Error set HTTP param URL");
     return CellReturnStatus::Error;
   }
 
@@ -1137,10 +1140,10 @@ CellReturnStatus CellularModuleA7672XX::_httpAction(int httpMethodCode, int conn
   at_->sendAT(data.c_str());
   auto response = at_->waitResponse(); // Wait for OK
   if (response == ATCommandHandler::Timeout) {
-    ESP_LOGW(TAG, "Timeout wait response +HTTPACTION GET");
+    AG_LOGW(TAG, "Timeout wait response +HTTPACTION GET");
     return CellReturnStatus::Timeout;
   } else if (response == ATCommandHandler::ExpArg2) {
-    ESP_LOGW(TAG, "Error execute HTTPACTION GET");
+    AG_LOGW(TAG, "Error execute HTTPACTION GET");
     return CellReturnStatus::Error;
   }
 
@@ -1152,7 +1155,7 @@ CellReturnStatus CellularModuleA7672XX::_httpAction(int httpMethodCode, int conn
   // Wait for +HTTPACTION finish execute
   response = at_->waitResponse(waitActionTimeout, "+HTTPACTION:");
   if (response == ATCommandHandler::Timeout) {
-    ESP_LOGW(TAG, "Timeout wait +HTTPACTION success execution");
+    AG_LOGW(TAG, "Timeout wait +HTTPACTION success execution");
     return CellReturnStatus::Timeout;
   }
 
@@ -1160,11 +1163,11 @@ CellReturnStatus CellularModuleA7672XX::_httpAction(int httpMethodCode, int conn
   at_->waitAndRecvRespLine(data);
   // Sanity check if value is empty
   if (data.empty()) {
-    ESP_LOGW(TAG, "+HTTPACTION result value empty");
+    AG_LOGW(TAG, "+HTTPACTION result value empty");
     return CellReturnStatus::Failed;
   }
 
-  ESP_LOGI(TAG, "+HTTPACTION finish! retrieve its values");
+  AG_LOGI(TAG, "+HTTPACTION finish! retrieve its values");
 
   // 0,code,size
   // start from code, ignore 0 (GET)
@@ -1173,7 +1176,7 @@ CellReturnStatus CellularModuleA7672XX::_httpAction(int httpMethodCode, int conn
     // -1 means string cannot splitted by comma
     // 7xx This is error code <errcode> not http <status_code>
     // 16.3.2 Description of<errcode> datasheet
-    ESP_LOGW(TAG, "+HTTPACTION error with module errcode: %d", code);
+    AG_LOGW(TAG, "+HTTPACTION error with module errcode: %d", code);
     return CellReturnStatus::Failed;
   }
 
@@ -1190,10 +1193,10 @@ CellReturnStatus CellularModuleA7672XX::_httpTerminate() {
   at_->sendAT("+HTTPTERM");
   auto response = at_->waitResponse();
   if (response == ATCommandHandler::Timeout) {
-    ESP_LOGW(TAG, "Timeout wait response +HTTPTERM");
+    AG_LOGW(TAG, "Timeout wait response +HTTPTERM");
     return CellReturnStatus::Timeout;
   } else if (response == ATCommandHandler::ExpArg2) {
-    ESP_LOGW(TAG, "Error stop module HTTP service");
+    AG_LOGW(TAG, "Error stop module HTTP service");
     return CellReturnStatus::Error;
   }
 
@@ -1213,7 +1216,7 @@ int CellularModuleA7672XX::_mapCellTechToMode(CellTechnology ct) {
     mode = 38;
     break;
   default:
-    ESP_LOGE(TAG, "CellTechnology not supported for this module");
+    AG_LOGE(TAG, "CellTechnology not supported for this module");
     break;
   }
 
@@ -1233,7 +1236,7 @@ std::string CellularModuleA7672XX::_mapCellTechToNetworkRegisCmd(CellTechnology 
     cmd = "CEREG";
     break;
   default:
-    ESP_LOGE(TAG, "CellTechnology not supported for this module");
+    AG_LOGE(TAG, "CellTechnology not supported for this module");
     break;
   }
 

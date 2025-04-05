@@ -12,13 +12,6 @@
 
 #include <string>
 
-#ifdef ARDUINO
-//! Somehow if compile using pio and not include this. esp_log not come out.
-#include <Arduino.h>
-#endif
-
-#include "esp_log.h"
-
 #include "airgradientClient.h"
 #include "cellularModule.h"
 

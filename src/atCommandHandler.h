@@ -13,10 +13,7 @@
 #include <cstdint>
 #include <string>
 
-#include "esp_log.h"
-
 #include "agSerial.h"
-#include "common.h"
 
 #define AT_DEBUG
 #define AT_OK "OK"

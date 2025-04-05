@@ -8,6 +8,7 @@
 #ifndef ESP8266
 
 #include "agSerial.h"
+#include "agLogger.h"
 
 #define MAX_RETRY_IICSERIAL_UART_INIT 3
 
@@ -23,7 +24,7 @@ AgSerial::~AgSerial() {
 void AgSerial::init(int iicResetIO) {
   if (iicSerial_ != nullptr) {
     // already initialized
-    ESP_LOGI(TAG, "IICSerial Already initialized");
+    AG_LOGI(TAG, "IICSerial Already initialized");
     return;
   }
 
@@ -33,12 +34,12 @@ void AgSerial::init(int iicResetIO) {
   gpio_set_direction(_iicResetIO, GPIO_MODE_OUTPUT);
   gpio_set_level(_iicResetIO, 1);
   iicSerial_ = new DFRobot_IICSerial(_wire, SUBUART_CHANNEL_1, 1, 1);
-  ESP_LOGI(TAG, "IICSerial initialized");
+  AG_LOGI(TAG, "IICSerial initialized");
 }
 
 bool AgSerial::open(int baud) {
   if (_atLineOpened) {
-    ESP_LOGI(TAG, "IICSerial already opened");
+    AG_LOGI(TAG, "IICSerial already opened");
     return true;
   }
 
@@ -49,23 +50,23 @@ bool AgSerial::open(int baud) {
       break;
     }
 
-    ESP_LOGW(TAG, "IICSerial failed open serial line, retry..");
+    AG_LOGW(TAG, "IICSerial failed open serial line, retry..");
     counter++;
     delay(500);
   } while (counter < MAX_RETRY_IICSERIAL_UART_INIT);
 
   if (!_atLineOpened) {
-    ESP_LOGE(TAG, "IICSerial failed open serial line, give up..");
+    AG_LOGE(TAG, "IICSerial failed open serial line, give up..");
     return false;
   }
 
-  ESP_LOGI(TAG, "IICSerial success open serial line");
+  AG_LOGI(TAG, "IICSerial success open serial line");
   return true;
 }
 
 void AgSerial::close() {
   if (!_atLineOpened) {
-    ESP_LOGI(TAG, "IICSerial line already closed");
+    AG_LOGI(TAG, "IICSerial line already closed");
     return;
   }
 

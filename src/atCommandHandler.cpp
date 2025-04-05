@@ -8,6 +8,8 @@
 #ifndef ESP8266
 
 #include "atCommandHandler.h"
+#include "common.h"
+#include "agLogger.h"
 
 #define AT_YIELD()                                                                                 \
   {                                                                                                \
@@ -55,7 +57,7 @@ ATCommandHandler::Response ATCommandHandler::waitResponse(uint32_t timeoutMs, co
     while (agSerial_->available() && response == Timeout) {
       // buffer overflow check
       if (idx >= DEFAULT_BUFFER_ALLOC) {
-        ESP_LOGE(TAG, "waitResponse() buffer overflow");
+        AG_LOGE(TAG, "waitResponse() buffer overflow");
         return Response::CMxError; // TODO: Handle better, should not CMxError
       }
       _buffer[idx] = agSerial_->read();
@@ -72,7 +74,7 @@ ATCommandHandler::Response ATCommandHandler::waitResponse(uint32_t timeoutMs, co
       else if (_endsWith(_buffer, RESP_ERROR_CME) || _endsWith(_buffer, RESP_ERROR_CMS)) {
         std::string errMsg;
         waitAndRecvRespLine(errMsg);
-        ESP_LOGW(TAG, "CMx error message: %s", errMsg.c_str());
+        AG_LOGW(TAG, "CMx error message: %s", errMsg.c_str());
         response = CMxError;
       }
     }
@@ -120,7 +122,7 @@ int ATCommandHandler::waitAndRecvRespLine(char *received, int memorySize, uint32
 
       // buffer overflow check
       if (idx >= memorySize) {
-        ESP_LOGE(TAG, "waitAndRecvRespLine() buffer overflow");
+        AG_LOGE(TAG, "waitAndRecvRespLine() buffer overflow");
         return 0; // TODO: Handle better
       }
       // Append to buffer

@@ -13,12 +13,10 @@
 #include <string>
 
 #include "driver/gpio.h"
-#include "esp_log.h"
 
 #include "agSerial.h"
 #include "atCommandHandler.h"
 #include "cellularModule.h"
-#include "common.h"
 
 class CellularModuleA7672XX : public CellularModule {
 private:
