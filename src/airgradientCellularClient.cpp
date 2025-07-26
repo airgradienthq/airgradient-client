@@ -5,12 +5,20 @@
  * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
  */
 
+#include <cmath>
 #ifndef ESP8266
 
 #include "airgradientCellularClient.h"
+#include <sstream>
 #include "cellularModule.h"
 #include "common.h"
 #include "agLogger.h"
+#include "config.h"
+
+// TODO: Use kconfig with default ONE_OPENAIR
+#define ONE_OPENAIR_POST_MEASURES_ENDPOINT "cts"
+#define OPENAIR_MAX_POST_MEASURES_ENDPOINT "cvn"
+#define POST_MEASURES_ENDPOINT OPENAIR_MAX_POST_MEASURES_ENDPOINT
 
 AirgradientCellularClient::AirgradientCellularClient(CellularModule *cellularModule)
     : cell_(cellularModule) {}
@@ -41,7 +49,8 @@ bool AirgradientCellularClient::begin(std::string sn) {
   AG_LOGI(TAG, "SIM CCID: %s", result.data.c_str());
 
   // Register network
-  result = cell_->startNetworkRegistration(CellTechnology::LTE, _apn, (5 * 60000));
+  result =
+      cell_->startNetworkRegistration(CellTechnology::Auto, _apn, _networkRegistrationTimeoutMs);
   if (result.status != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Cellular client failed, module cannot register to network");
     return false;
@@ -53,9 +62,12 @@ bool AirgradientCellularClient::begin(std::string sn) {
   return true;
 }
 
-std::string AirgradientCellularClient::getICCID() {
-  return _iccid;
+void AirgradientCellularClient::setNetworkRegistrationTimeoutMs(int timeoutMs) {
+  _networkRegistrationTimeoutMs = timeoutMs;
+  ESP_LOGI(TAG, "Timeout set to %d seconds", (_networkRegistrationTimeoutMs / 1000));
 }
+
+std::string AirgradientCellularClient::getICCID() { return _iccid; }
 
 bool AirgradientCellularClient::ensureClientConnection(bool reset) {
   AG_LOGE(TAG, "Ensuring client connection, restarting cellular module");
@@ -78,7 +90,8 @@ bool AirgradientCellularClient::ensureClientConnection(bool reset) {
   }
 
   // Register network
-  auto result = cell_->startNetworkRegistration(CellTechnology::LTE, _apn, (5 * 60000));
+  auto result =
+      cell_->startNetworkRegistration(CellTechnology::Auto, _apn, _networkRegistrationTimeoutMs);
   if (result.status != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Cellular client failed, module cannot register to network");
     clientReady = false;
@@ -109,7 +122,7 @@ std::string AirgradientCellularClient::httpFetchConfig() {
   // Response status check if fetch failed
   if (result.data.statusCode != 200) {
     AG_LOGW(TAG, "Failed fetch configuration from server with return code %d",
-             result.data.statusCode);
+            result.data.statusCode);
     // Return code 400 means device not registered on ag server
     if (result.data.statusCode == 400) {
       registeredOnAgServer = false;
@@ -130,7 +143,7 @@ std::string AirgradientCellularClient::httpFetchConfig() {
     return {};
   }
 
-  AG_LOGD(TAG, "Received configuration: (%d) %s", result.data.bodyLen, result.data.body.get());
+  AG_LOGI(TAG, "Received configuration: (%d) %s", result.data.bodyLen, result.data.body.get());
 
   // Move the string from unique_ptr
   std::string body = std::string(result.data.body.get());
@@ -143,7 +156,8 @@ std::string AirgradientCellularClient::httpFetchConfig() {
 bool AirgradientCellularClient::httpPostMeasures(const std::string &payload) {
   // std::string url = buildPostMeasuresUrl();
   char url[80] = {0};
-  sprintf(url, "http://%s/sensors/%s/cts", httpDomain.c_str(), serialNumber.c_str());
+  sprintf(url, "http://%s/sensors/%s/%s", httpDomain.c_str(), serialNumber.c_str(),
+          POST_MEASURES_ENDPOINT);
   AG_LOGI(TAG, "Post measures to %s", url);
   AG_LOGI(TAG, "Payload: %s", payload.c_str());
 
@@ -170,6 +184,112 @@ bool AirgradientCellularClient::httpPostMeasures(const std::string &payload) {
   AG_LOGI(TAG, "Success post measures to server with response code %d", result.data.statusCode);
 
   return true;
+}
+
+bool AirgradientCellularClient::httpPostMeasures(int measureInterval,
+                                                 std::vector<OpenAirMaxPayload> data) {
+  // Build payload using oss, easier to manage if there's an invalid value that should not included
+  std::ostringstream payload;
+
+  // Add interval at the first position
+  payload << measureInterval;
+
+  for (const OpenAirMaxPayload &v : data) {
+    // Seperator between measures cycle
+    payload << ",";
+    // CO2
+    if (IS_CO2_VALID(v.rco2)) {
+      payload << std::round(v.rco2);
+    }
+    payload << ",";
+    // Temperature
+    if (IS_TEMPERATURE_VALID(v.atmp)) {
+      payload << std::round(v.atmp * 10);
+    }
+    payload << ",";
+    // Humidity
+    if (IS_HUMIDITY_VALID(v.rhum)) {
+      payload << std::round(v.rhum * 10);
+    }
+    payload << ",";
+    // PM1.0 atmospheric environment
+    if (IS_PM_VALID(v.pm01)) {
+      payload << std::round(v.pm01 * 10);
+    }
+    payload << ",";
+    // PM2.5 atmospheric environment
+    if (IS_PM_VALID(v.pm25)) {
+      payload << std::round(v.pm25 * 10);
+    }
+    payload << ",";
+    // PM10 atmospheric environment
+    if (IS_PM_VALID(v.pm10)) {
+      payload << std::round(v.pm10 * 10);
+    }
+    payload << ",";
+    // TVOC
+    if (IS_TVOC_VALID(v.tvocRaw)) {
+      payload << v.tvocRaw;
+    }
+    payload << ",";
+    // NOx
+    if (IS_NOX_VALID(v.noxRaw)) {
+      payload << v.noxRaw;
+    }
+    payload << ",";
+    // PM 0.3 particle count
+    if (IS_PM_VALID(v.particleCount003)) {
+      payload << v.particleCount003;
+    }
+    payload << ",";
+    // Radio signal
+    if (v.signal > 0) {
+      int dbm = cell_->csqToDbm(v.signal);
+      if (dbm != 0) {
+        payload << dbm;
+      }
+    }
+    payload << ",";
+    // V Battery
+    if (IS_VOLT_VALID(v.vBat)) {
+      payload << std::round(v.vBat * 100);
+    }
+    payload << ",";
+    // V Solar Panel
+    if (IS_VOLT_VALID(v.vPanel)) {
+      payload << std::round(v.vPanel * 100);
+    }
+    payload << ",";
+    // Working Electrode O3
+    if (IS_VOLT_VALID(v.o3WorkingElectrode)) {
+      payload << std::round(v.o3WorkingElectrode * 1000);
+    }
+    payload << ",";
+    // Auxiliary Electrode O3
+    if (IS_VOLT_VALID(v.o3AuxiliaryElectrode)) {
+      payload << std::round(v.o3AuxiliaryElectrode * 1000);
+    }
+    payload << ",";
+    // Working Electrode NO2
+    if (IS_VOLT_VALID(v.no2WorkingElectrode)) {
+      payload << std::round(v.no2WorkingElectrode * 1000);
+    }
+    payload << ",";
+    // Auxiliary Electrode NO2
+    if (IS_VOLT_VALID(v.no2AuxiliaryElectrode)) {
+      payload << std::round(v.no2AuxiliaryElectrode * 1000);
+    }
+    payload << ",";
+    // AFE Temperature
+    if (IS_VOLT_VALID(v.afeTemp)) {
+      payload << std::round(v.afeTemp * 10);
+    }
+  }
+
+  // Compile it
+  std::string toSend = payload.str();
+
+  return httpPostMeasures(toSend);
 }
 
 bool AirgradientCellularClient::mqttConnect() {

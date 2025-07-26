@@ -9,6 +9,7 @@
  * @date  2019-07-28
  * @https://github.com/DFRobot/DFRobot_IICSerial
  */
+#ifdef ARDUINO
 #include <Arduino.h>
 #include "config.h"
 #include "DFRobot_IICSerial.h"
@@ -651,3 +652,4 @@ void DFRobot_IICSerial::writeFIFO(void *pBuf, size_t size) {
     _pBuf = _pBuf + size;
   }
 }
+#endif

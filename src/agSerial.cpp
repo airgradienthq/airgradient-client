@@ -5,6 +5,7 @@
  * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
  */
 
+#ifdef ARDUINO
 #ifndef ESP8266
 
 #include "agSerial.h"
@@ -99,3 +100,4 @@ uint8_t AgSerial::read() {
 }
 
 #endif // ESP8266
+#endif // ARDUINO

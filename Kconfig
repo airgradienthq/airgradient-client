@@ -1,0 +1,21 @@
+menu "Airgradient Client"
+    menu "AT Command Handler"
+        config BUFFER_LENGTH_ALLOCATION
+            int "Buffer to allocate when receiving response"
+            default 512
+            range 100 5000 
+            help
+                Size of buffer to allocate to receive AT command response in bytes
+    endmenu
+    menu "Cellular module"
+        config HTTPREAD_CHUNK_SIZE
+            int "Chunk size to receive from HTTPREAD"
+            default 200
+            range 200 2000
+            help
+                For A7672XX length command of HTTPREAD size to read in bytes
+        config DELAY_HTTPREAD_ITERATION_ENABLED
+            bool "Add delay between HTTPREAD iteration"
+            default y 
+    endmenu
+endmenu

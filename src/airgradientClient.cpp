@@ -11,17 +11,15 @@
 
 bool AirgradientClient::begin(std::string sn) { return true; }
 
+void AirgradientClient::setNetworkRegistrationTimeoutMs(int timeoutMs) {}
+
 std::string AirgradientClient::getICCID() { return ""; }
 
 bool AirgradientClient::ensureClientConnection(bool reset) { return true; }
 
-void AirgradientClient::setHttpDomain(const std::string &target) {
-  httpDomain = target;
-}
+void AirgradientClient::setHttpDomain(const std::string &target) { httpDomain = target; }
 
-void AirgradientClient::setHttpDomainDefault() {
-  httpDomain = AIRGRADIENT_HTTP_DOMAIN;
-}
+void AirgradientClient::setHttpDomainDefault() { httpDomain = AIRGRADIENT_HTTP_DOMAIN; }
 
 bool AirgradientClient::isClientReady() { return clientReady; }
 
@@ -30,6 +28,10 @@ void AirgradientClient::setClientReady(bool isReady) { clientReady = isReady; }
 std::string AirgradientClient::httpFetchConfig() { return std::string(); }
 
 bool AirgradientClient::httpPostMeasures(const std::string &payload) { return false; }
+
+bool AirgradientClient::httpPostMeasures(int measureInterval, std::vector<OpenAirMaxPayload> data) {
+  return false;
+}
 
 bool AirgradientClient::mqttConnect() { return false; }
 
@@ -51,9 +53,11 @@ std::string AirgradientClient::buildFetchConfigUrl(bool useHttps) {
   // http://hw.airgradient.com/sensors/airgradient:aabbccddeeff/one/config
   char url[80] = {0};
   if (useHttps) {
-    sprintf(url, "https://%s/sensors/airgradient:%s/one/config", httpDomain.c_str(), serialNumber.c_str());
+    sprintf(url, "https://%s/sensors/airgradient:%s/one/config", httpDomain.c_str(),
+            serialNumber.c_str());
   } else {
-    sprintf(url, "http://%s/sensors/airgradient:%s/one/config", httpDomain.c_str(), serialNumber.c_str());
+    sprintf(url, "http://%s/sensors/airgradient:%s/one/config", httpDomain.c_str(),
+            serialNumber.c_str());
   }
 
   return std::string(url);
@@ -63,9 +67,11 @@ std::string AirgradientClient::buildPostMeasuresUrl(bool useHttps) {
   // http://hw.airgradient.com/sensors/airgradient:aabbccddeeff/measures
   char url[80] = {0};
   if (useHttps) {
-    sprintf(url, "https://%s/sensors/airgradient:%s/measures", httpDomain.c_str(), serialNumber.c_str());
+    sprintf(url, "https://%s/sensors/airgradient:%s/measures", httpDomain.c_str(),
+            serialNumber.c_str());
   } else {
-    sprintf(url, "http://%s/sensors/airgradient:%s/measures", httpDomain.c_str(), serialNumber.c_str());
+    sprintf(url, "http://%s/sensors/airgradient:%s/measures", httpDomain.c_str(),
+            serialNumber.c_str());
   }
 
   return std::string(url);

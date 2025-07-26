@@ -5,24 +5,27 @@
  * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
  */
 
+#include "freertos/idf_additions.h"
+#include "freertos/projdefs.h"
 #ifndef ESP8266
 
+#include "cellularModuleA7672xx.h"
 #include <cstdint>
 #include <memory>
+#include <cstring>
 
 #include "common.h"
 #include "agLogger.h"
 #include "agSerial.h"
-#include "cellularModuleA7672xx.h"
 #include "cellularModule.h"
 #include "atCommandHandler.h"
 #include "cellularModule.h"
 
 #define REGIS_RETRY_DELAY() DELAY_MS(1000);
 
-CellularModuleA7672XX::CellularModuleA7672XX(AgSerial *agSerial) : agSerial_(agSerial) {}
+CellularModuleA7672XX::CellularModuleA7672XX(AirgradientSerial *agSerial) : agSerial_(agSerial) {}
 
-CellularModuleA7672XX::CellularModuleA7672XX(AgSerial *agSerial, int powerPin) {
+CellularModuleA7672XX::CellularModuleA7672XX(AirgradientSerial *agSerial, int powerPin) {
   agSerial_ = agSerial;
   _powerIO = static_cast<gpio_num_t>(powerPin);
 }
@@ -75,6 +78,10 @@ bool CellularModuleA7672XX::init() {
   at_->sendAT("+CGEREP=0");
   at_->waitResponse();
   DELAY_MS(2000);
+
+  // Print product identification information
+  at_->sendRaw("ATI");
+  at_->waitResponse();
 
   _initialized = true;
   return true;
@@ -286,7 +293,7 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
       startStateTime = MILLIS();
       break;
     case CHECK_NETWORK_REGISTRATION:
-      if ((MILLIS() - startStateTime) > 10000) {
+      if ((MILLIS() - startStateTime) > 15000) {
         // Timeout wait network registration to expected status, configuring network
         state = CONFIGURE_NETWORK;
         continue;
@@ -308,7 +315,7 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
       break;
     case CONFIGURE_NETWORK:
       // Here's after finish goes back to check network registration status
-      state = _implConfigureNetwork();
+      state = _implConfigureNetwork(apn);
       // After configuring network, check network registration status
       // Reset time for CHECK_NETWORK_REGISTRATION
       startStateTime = MILLIS();
@@ -404,7 +411,7 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
   }
 
   AG_LOGI(TAG, "HTTP response code %d with body len: %d. Retrieving response body...", statusCode,
-           bodyLen);
+          bodyLen);
 
   uint32_t retrieveStartTime = MILLIS();
 
@@ -417,10 +424,10 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
     // +HTTPREAD
     int offset = 0;
     int receivedBufferLen;
-    char buf[HTTPREAD_CHUNK_SIZE * 2]; // Just to make sure not overflow
+    char *buf = new char[HTTPREAD_CHUNK_SIZE + 1]; // Add +1 to give a space at the end
 
     do {
-      memset(buf, 0, sizeof(buf));
+      memset(buf, 0, (HTTPREAD_CHUNK_SIZE + 1));
       sprintf(buf, "+HTTPREAD=%d,%d", offset, HTTPREAD_CHUNK_SIZE);
       at_->sendAT(buf);
       response = at_->waitResponse("+HTTPREAD:"); // Wait for first +HTTPREAD, skip the OK
@@ -445,9 +452,10 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
       if (receivedActual != receivedBufferLen) {
         // Size received not the same as expected, handle better
         AG_LOGE(TAG, "receivedBufferLen: %d | receivedActual: %d", receivedBufferLen,
-                 receivedActual);
+                receivedActual);
         break;
       }
+      at_->waitResponse("+HTTPREAD: 0");
       at_->clearBuffer();
 
       AG_LOGV(TAG, "Received body len from buffer: %d", receivedBufferLen);
@@ -458,7 +466,12 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
       // Continue to retrieve another 200 bytes
       offset = offset + HTTPREAD_CHUNK_SIZE;
 
-    } while (offset < bodyLen); // TODO: Add timeout?
+#if CONFIG_DELAY_HTTPREAD_ITERATION_ENABLED
+      vTaskDelay(pdMS_TO_TICKS(10));
+#endif
+    } while (offset < bodyLen);
+
+    delete[] buf;
 
     // Check if all response body data received
     if (offset < bodyLen) {
@@ -470,7 +483,7 @@ CellularModuleA7672XX::httpGet(const std::string &url, int connectionTimeout, in
   }
 
   AG_LOGD(TAG, "Finish retrieve response body from module buffer in %.2fs",
-           ((float)MILLIS() - retrieveStartTime) / 1000);
+          ((float)MILLIS() - retrieveStartTime) / 1000);
 
   // set status code and response body for return function
   result.data.statusCode = statusCode;
@@ -794,7 +807,13 @@ CellularModuleA7672XX::_implPrepareRegistration(CellTechnology ct) {
 
 CellularModuleA7672XX::NetworkRegistrationState
 CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct) {
-  CellReturnStatus crs = isNetworkRegistered(ct);
+  CellReturnStatus crs;
+  if (ct == CellTechnology::Auto) {
+    crs = _checkAllRegistrationStatusCommand();
+  } else {
+    crs = isNetworkRegistered(ct);
+  }
+
   if (crs == CellReturnStatus::Timeout) {
     // Go back to check module ready
     return CHECK_MODULE_READY;
@@ -828,11 +847,22 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implEnsu
     return ENSURE_SERVICE_READY;
   }
 
+  // Check if network attach
+  crs = _ensurePacketDomainAttached(false);
+  if (crs == CellReturnStatus::Timeout) {
+    // Go back to check module ready
+    return CHECK_MODULE_READY;
+  } else if (crs == CellReturnStatus::Failed || crs == CellReturnStatus::Error) {
+    REGIS_RETRY_DELAY();
+    return ENSURE_SERVICE_READY;
+  }
+
   AG_LOGI(TAG, "Continue: NETWORK_REGISTERED");
   return NETWORK_REGISTERED;
 }
 
-CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implConfigureNetwork() {
+CellularModuleA7672XX::NetworkRegistrationState
+CellularModuleA7672XX::_implConfigureNetwork(const std::string &apn) {
   CellResult<int> result = retrieveSignal();
   if (result.status == CellReturnStatus::Timeout) {
     // Go back to check module ready
@@ -841,7 +871,15 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implConf
 
   AG_LOGI(TAG, "Cellular signal: %d", result.data);
 
-  CellReturnStatus crs = _checkOperatorSelection();
+  CellReturnStatus crs = _applyAPN(apn);
+  if (crs == CellReturnStatus::Timeout) {
+    // Go back to check module ready
+    return CHECK_MODULE_READY;
+  } else if (crs == CellReturnStatus::Error) {
+    // TODO: What's next if this return error?
+  }
+
+  crs = _checkOperatorSelection();
   if (crs == CellReturnStatus::Timeout) {
     // Go back to check module ready
     return CHECK_MODULE_READY;
@@ -849,6 +887,19 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implConf
     // Result already as expected, go back to check network registration status
     return CHECK_NETWORK_REGISTRATION;
   }
+
+  _printNetworkInfo();
+
+  crs = _applyPreferedBands();
+  if (crs == CellReturnStatus::Timeout) {
+    // Go back to check module ready
+    return CHECK_MODULE_READY;
+  } else if (crs == CellReturnStatus::Error) {
+    // TODO: What's next if this return error?
+  }
+
+  AG_LOGI(TAG, "Wait band settings to be applied for 5s, before set COPS back to automatic");
+  DELAY_MS(5000);
 
   crs = _applyOperatorSelection();
   if (crs == CellReturnStatus::Timeout) {
@@ -864,7 +915,7 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implConf
 
 CellularModuleA7672XX::NetworkRegistrationState
 CellularModuleA7672XX::_implConfigureService(const std::string &apn) {
-  CellReturnStatus crs = _applyAPN(apn);
+  CellReturnStatus crs = _activatePDPContext();
   if (crs == CellReturnStatus::Timeout) {
     // Go back to check module ready
     return CHECK_MODULE_READY;
@@ -872,15 +923,7 @@ CellularModuleA7672XX::_implConfigureService(const std::string &apn) {
     // TODO: What's next if this return error?
   }
 
-  crs = _activatePDPContext();
-  if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
-    return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Error) {
-    // TODO: What's next if this return error?
-  }
-
-  crs = _ensurePacketDomainAttached();
+  crs = _ensurePacketDomainAttached(true);
   if (crs == CellReturnStatus::Timeout) {
     // Go back to check module ready
     return CHECK_MODULE_READY;
@@ -920,19 +963,58 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implNetw
 }
 
 CellReturnStatus CellularModuleA7672XX::_disableNetworkRegistrationURC(CellTechnology ct) {
-  auto cmdNR = _mapCellTechToNetworkRegisCmd(ct);
-  if (cmdNR.empty()) {
-    return CellReturnStatus::Error;
-  }
+  if (ct == CellTechnology::Auto) {
+    // Send every network registration command
+    at_->sendAT("+CREG=0");
+    if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
+      return CellReturnStatus::Timeout;
+    }
+    at_->sendAT("+CGREG=0");
+    if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
+      return CellReturnStatus::Timeout;
+    }
+    at_->sendAT("+CEREG=0");
+    if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
+      return CellReturnStatus::Timeout;
+    }
+  } else {
+    auto cmdNR = _mapCellTechToNetworkRegisCmd(ct);
+    if (cmdNR.empty()) {
+      return CellReturnStatus::Error;
+    }
 
-  char buf[15] = {0};
-  sprintf(buf, "+%s=0", cmdNR.c_str());
-  at_->sendAT(buf);
-  if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
-    return CellReturnStatus::Timeout;
+    char buf[15] = {0};
+    sprintf(buf, "+%s=0", cmdNR.c_str());
+    at_->sendAT(buf);
+    if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
+      return CellReturnStatus::Timeout;
+    }
   }
 
   return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_checkAllRegistrationStatusCommand() {
+  // 2G or 3G
+  auto crs = isNetworkRegistered(CellTechnology::Auto);
+  if (crs == CellReturnStatus::Timeout || crs == CellReturnStatus::Ok) {
+    return crs;
+  }
+
+  // 2G or 3G
+  crs = isNetworkRegistered(CellTechnology::TWO_G);
+  if (crs == CellReturnStatus::Timeout || crs == CellReturnStatus::Ok) {
+    return crs;
+  }
+
+  // 4G
+  crs = isNetworkRegistered(CellTechnology::LTE);
+  if (crs == CellReturnStatus::Timeout || crs == CellReturnStatus::Ok) {
+    return crs;
+  }
+
+  // If after all command check its not return OK, then network still not attached
+  return CellReturnStatus::Failed;
 }
 
 CellReturnStatus CellularModuleA7672XX::_applyCellularTechnology(CellTechnology ct) {
@@ -940,6 +1022,18 @@ CellReturnStatus CellularModuleA7672XX::_applyCellularTechnology(CellTechnology 
   int mode = _mapCellTechToMode(ct);
   std::string cmd = std::string("+CNMP=") + std::to_string(mode);
   at_->sendAT(cmd.c_str());
+  if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
+    // TODO: This should be error or timeout
+    return CellReturnStatus::Error;
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_applyPreferedBands() {
+  // Attempt to apply all bands supported (might be different based on the region)
+  // Apply for both 2G and 4G
+  at_->sendAT("+CNBP=0xFFFFFFFF7FFFFFFF,0x000007FF3FDF3FFF,0x000F");
   if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
     // TODO: This should be error or timeout
     return CellReturnStatus::Error;
@@ -973,6 +1067,24 @@ CellReturnStatus CellularModuleA7672XX::_checkOperatorSelection() {
   }
 
   // receive OK response from the buffer, ignore it
+  at_->waitResponse();
+
+  return crs;
+}
+
+CellReturnStatus CellularModuleA7672XX::_printNetworkInfo() {
+  auto crs = CellReturnStatus::Ok;
+  at_->sendAT("+CNBP?");
+  at_->waitResponse();
+
+  AG_LOGI(TAG, "Wait to list operator selections..");
+  at_->sendAT("+COPS=?");
+  at_->waitResponse(60000);
+
+  at_->sendAT("+CPSI?");
+  at_->waitResponse();
+
+  at_->sendAT("+CGDCONT?");
   at_->waitResponse();
 
   return crs;
@@ -1014,7 +1126,7 @@ CellReturnStatus CellularModuleA7672XX::_applyAPN(const std::string &apn) {
   return CellReturnStatus::Ok;
 }
 
-CellReturnStatus CellularModuleA7672XX::_ensurePacketDomainAttached() {
+CellReturnStatus CellularModuleA7672XX::_ensurePacketDomainAttached(bool forceAttach) {
   at_->sendAT("+CGATT?");
   if (at_->waitResponse("+CGATT:") != ATCommandHandler::ExpArg1) {
     // If return error or not response consider "error"
@@ -1029,6 +1141,11 @@ CellReturnStatus CellularModuleA7672XX::_ensurePacketDomainAttached() {
   if (state == "1") {
     // Already attached
     return CellReturnStatus::Ok;
+  }
+
+  if (!forceAttach) {
+    // Not expect to attach it manually, then return failed because its not attached
+    return CellReturnStatus::Failed;
   }
 
   // Not attached, attempt to

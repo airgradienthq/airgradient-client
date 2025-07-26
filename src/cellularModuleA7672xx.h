@@ -14,17 +14,32 @@
 
 #include "driver/gpio.h"
 
+#ifdef ARDUINO
 #include "agSerial.h"
+#else
+#include "AirgradientSerial.h"
+#endif
 #include "atCommandHandler.h"
 #include "cellularModule.h"
 
+#ifndef CONFIG_HTTPREAD_CHUNK_SIZE
+// This configuration define by kconfig
+#define CONFIG_HTTPREAD_CHUNK_SIZE 200
+#endif
+
 class CellularModuleA7672XX : public CellularModule {
+public:
+#ifdef ARDUINO
+  // NOTE: Temporarily accomodate ununified AirgradientSerial
+  typedef AgSerial AirgradientSerial;
+#endif
+
 private:
   const char *const TAG = "A7672XX";
 
   bool _initialized = false;
 
-  AgSerial *agSerial_ = nullptr;
+  AirgradientSerial *agSerial_ = nullptr;
   gpio_num_t _powerIO = GPIO_NUM_NC;
   ATCommandHandler *at_ = nullptr;
 
@@ -52,8 +67,8 @@ public:
     NETWORK_REGISTERED
   };
 
-  CellularModuleA7672XX(AgSerial *agSerial);
-  CellularModuleA7672XX(AgSerial *agSerial, int powerPin);
+  CellularModuleA7672XX(AirgradientSerial *agSerial);
+  CellularModuleA7672XX(AirgradientSerial *agSerial, int powerPin);
   ~CellularModuleA7672XX();
 
   bool init();
@@ -85,25 +100,28 @@ public:
 private:
   const int DEFAULT_HTTP_CONNECT_TIMEOUT = 120; // seconds
   const int DEFAULT_HTTP_RESPONSE_TIMEOUT = 20; // seconds
-  const int HTTPREAD_CHUNK_SIZE = 200;          // bytes
+  const int HTTPREAD_CHUNK_SIZE = CONFIG_HTTPREAD_CHUNK_SIZE;
 
   // Network Registration implementation for each state
   NetworkRegistrationState _implCheckModuleReady();
   NetworkRegistrationState _implPrepareRegistration(CellTechnology ct);
   NetworkRegistrationState _implCheckNetworkRegistration(CellTechnology ct);
   NetworkRegistrationState _implEnsureServiceReady();
-  NetworkRegistrationState _implConfigureNetwork();
+  NetworkRegistrationState _implConfigureNetwork(const std::string &apn);
   NetworkRegistrationState _implConfigureService(const std::string &apn);
   NetworkRegistrationState _implNetworkRegistered();
 
   // AT Command functions
   CellReturnStatus _disableNetworkRegistrationURC(CellTechnology ct); // depend on CellTech
+  CellReturnStatus _checkAllRegistrationStatusCommand();
   CellReturnStatus _applyCellularTechnology(CellTechnology ct);
+  CellReturnStatus _applyPreferedBands();
   CellReturnStatus _applyOperatorSelection();
   CellReturnStatus _checkOperatorSelection();
+  CellReturnStatus _printNetworkInfo();
   CellReturnStatus _isServiceAvailable();
   CellReturnStatus _applyAPN(const std::string &apn);
-  CellReturnStatus _ensurePacketDomainAttached();
+  CellReturnStatus _ensurePacketDomainAttached(bool forceAttach);
   CellReturnStatus _activatePDPContext();
   CellReturnStatus _httpInit();
   CellReturnStatus _httpSetParamTimeout(int connectionTimeout, int responseTimeout);

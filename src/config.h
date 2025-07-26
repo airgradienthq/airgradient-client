@@ -18,4 +18,12 @@
 #define DBG(...)
 #endif
 
+#define IS_PM_VALID(val) (val >= 0)
+#define IS_TEMPERATURE_VALID(val) ((val >= -40) && (val <= 125))
+#define IS_HUMIDITY_VALID(val) ((val >= 0) && (val <= 100))
+#define IS_CO2_VALID(val) ((val >= 0) && (val <= 10000))
+#define IS_TVOC_VALID(val) (val >= 0)
+#define IS_NOX_VALID(val) (val >= 0)
+#define IS_VOLT_VALID(val) (val >= 0)
+
 #endif

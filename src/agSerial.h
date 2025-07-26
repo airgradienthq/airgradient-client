@@ -5,6 +5,7 @@
  * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
  */
 
+#ifdef ARDUINO
 #ifndef AIRGRADIENT_SERIAL_H
 #define AIRGRADIENT_SERIAL_H
 
@@ -39,3 +40,4 @@ public:
 
 #endif // ESP8266
 #endif // AIRGRADIENT_SERIAL_H
+#endif // ARDUINO 

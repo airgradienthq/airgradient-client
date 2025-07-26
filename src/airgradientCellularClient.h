@@ -22,15 +22,19 @@ private:
   std::string _iccid = "";
   CellularModule *cell_ = nullptr;
 
+  int _networkRegistrationTimeoutMs = (3 * 60000);
+
 public:
   AirgradientCellularClient(CellularModule *cellularModule);
   ~AirgradientCellularClient() {};
 
   bool begin(std::string sn);
+  void setNetworkRegistrationTimeoutMs(int timeoutMs);
   std::string getICCID();
   bool ensureClientConnection(bool reset);
   std::string httpFetchConfig();
   bool httpPostMeasures(const std::string &payload);
+  bool httpPostMeasures(int measureInterval, std::vector<OpenAirMaxPayload> data);
   bool mqttConnect();
   bool mqttDisconnect();
   bool mqttPublishMeasures(const std::string &payload);

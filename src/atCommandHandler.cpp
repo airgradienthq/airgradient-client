@@ -8,6 +8,7 @@
 #ifndef ESP8266
 
 #include "atCommandHandler.h"
+#include <cstring>
 #include "common.h"
 #include "agLogger.h"
 
@@ -16,7 +17,7 @@
     DELAY_MS(2);                                                                                   \
   }
 
-ATCommandHandler::ATCommandHandler(AgSerial *agSerial) : agSerial_(agSerial) {}
+ATCommandHandler::ATCommandHandler(AirgradientSerial *agSerial) : agSerial_(agSerial) {}
 
 bool ATCommandHandler::testAT(uint32_t timeoutMs) {
   for (uint32_t start = MILLIS(); (MILLIS() - start) < timeoutMs;) {
@@ -79,7 +80,7 @@ ATCommandHandler::Response ATCommandHandler::waitResponse(uint32_t timeoutMs, co
       }
     }
 
-    AT_YIELD();
+    DELAY_MS(10);
   } while ((MILLIS() - waitStartTime) < timeoutMs && response == Timeout);
 
   return response;
@@ -128,6 +129,7 @@ int ATCommandHandler::waitAndRecvRespLine(char *received, int memorySize, uint32
       // Append to buffer
       received[idx] = b;
       idx++;
+      AT_YIELD();
     }
 
     AT_YIELD();

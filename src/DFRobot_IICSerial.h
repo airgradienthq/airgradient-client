@@ -14,6 +14,7 @@
  * @date  2019-07-28
  * @https://github.com/DFRobot/DFRobot_IICSerial
  */
+#ifdef ARDUINO
 #ifndef __DFRobot_IICSERIAL_H
 #define __DFRobot_IICSERIAL_H
 
@@ -494,4 +495,5 @@ private:
   uint8_t _addr;
   uint8_t _subSerialChannel;
 };
+#endif
 #endif

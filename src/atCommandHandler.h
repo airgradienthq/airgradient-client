@@ -13,15 +13,23 @@
 #include <cstdint>
 #include <string>
 
+#ifdef ARDUINO
 #include "agSerial.h"
+#else
+#include "AirgradientSerial.h"
+#endif
 
 #define AT_DEBUG
 #define AT_OK "OK"
 #define AT_ERROR "ERROR"
 #define AT_NL "\r\n"
-#define DEFAULT_BUFFER_ALLOC 512
 #define DEFAULT_RESPONSE_DATA_LEN 64
 #define DEFAULT_WAIT_RESPONSE_TIMEOUT 9000 // ms
+#ifdef CONFIG_BUFFER_LENGTH_ALLOCATION
+#define DEFAULT_BUFFER_ALLOC CONFIG_BUFFER_LENGTH_ALLOCATION
+#else
+#define DEFAULT_BUFFER_ALLOC 4000
+#endif
 
 static const char RESP_AT_OK[] = AT_OK AT_NL;
 static const char RESP_AT_ERROR[] = AT_ERROR AT_NL;
@@ -29,14 +37,20 @@ static const char RESP_ERROR_CME[] = "+CME ERROR:";
 static const char RESP_ERROR_CMS[] = "+CMS ERROR:";
 
 class ATCommandHandler {
+public:
+#ifdef ARDUINO
+  // NOTE: Temporarily accomodate ununified AirgradientSerial
+  typedef AgSerial AirgradientSerial;
+#endif
+
 private:
   const char *const TAG = "ATCMD";
-  AgSerial *agSerial_ = nullptr;
+  AirgradientSerial *agSerial_ = nullptr;
 
 public:
   enum Response { ExpArg1, ExpArg2, ExpArg3, Timeout, CMxError };
 
-  ATCommandHandler(AgSerial *agSerial);
+  ATCommandHandler(AirgradientSerial *agSerial);
   ~ATCommandHandler() {};
 
   bool testAT(uint32_t timeoutMs = 60000);
