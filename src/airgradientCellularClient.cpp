@@ -311,12 +311,12 @@ bool AirgradientCellularClient::mqttPublishMeasures(const AirgradientPayload &pa
   return mqttPublishMeasures(toSend);
 }
 
-void AirgradientCellularClient::_serialize(std::ostringstream &oss, int rco2, int particleCount003,
-                                           float pm01, float pm25, float pm10, int tvoc, int nox,
-                                           float atmp, float rhum, int signal, float vBat,
-                                           float vPanel, float o3WorkingElectrode,
-                                           float o3AuxiliaryElectrode, float no2WorkingElectrode,
-                                           float no2AuxiliaryElectrode, float afeTemp) {
+void AirgradientCellularClient::_serialize(
+    std::ostringstream &oss, int rco2, int particleCount003, float pm01, float pm25, float pm10,
+    int tvoc, int nox, float atmp, float rhum, int signal, float vBat, float vPanel,
+    float o3WorkingElectrode, float o3AuxiliaryElectrode, float no2WorkingElectrode,
+    float no2AuxiliaryElectrode, float afeTemp, int particleCount005, int particleCount01,
+    int particleCount02, int particleCount50, int particleCount10, float pm25Sp) {
   // CO2
   if (IS_CO2_VALID(rco2)) {
     oss << std::round(rco2);
@@ -366,50 +366,78 @@ void AirgradientCellularClient::_serialize(std::ostringstream &oss, int rco2, in
   oss << signal;
 
   // Only continue for MAX model
-  if (payloadType != MAX_WITH_O3_NO2 && payloadType != MAX_WITHOUT_O3_NO2) {
-    return;
+  if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
+    oss << ",";
+    // V Battery
+    if (IS_VOLT_VALID(vBat)) {
+      oss << std::round(vBat * 100);
+    }
+    oss << ",";
+    // V Solar Panel
+    if (IS_VOLT_VALID(vPanel)) {
+      oss << std::round(vPanel * 100);
+    }
+
+    if (payloadType == MAX_WITH_O3_NO2) {
+      oss << ",";
+      // Working Electrode O3
+      if (IS_VOLT_VALID(o3WorkingElectrode)) {
+        oss << std::round(o3WorkingElectrode * 1000);
+      }
+      oss << ",";
+      // Auxiliary Electrode O3
+      if (IS_VOLT_VALID(o3AuxiliaryElectrode)) {
+        oss << std::round(o3AuxiliaryElectrode * 1000);
+      }
+      oss << ",";
+      // Working Electrode NO2
+      if (IS_VOLT_VALID(no2WorkingElectrode)) {
+        oss << std::round(no2WorkingElectrode * 1000);
+      }
+      oss << ",";
+      // Auxiliary Electrode NO2
+      if (IS_VOLT_VALID(no2AuxiliaryElectrode)) {
+        oss << std::round(no2AuxiliaryElectrode * 1000);
+      }
+      oss << ",";
+      // AFE Temperature
+      if (IS_VOLT_VALID(afeTemp)) {
+        oss << std::round(afeTemp * 10);
+      }
+    }
   }
 
+  // TODO: Add condition for extended measures
+  // Extended measures
   oss << ",";
-  // V Battery
-  if (IS_VOLT_VALID(vBat)) {
-    oss << std::round(vBat * 100);
+  // PM 0.5 particle count
+  if (IS_PM_VALID(particleCount005)) {
+    oss << particleCount005;
   }
   oss << ",";
-  // V Solar Panel
-  if (IS_VOLT_VALID(vPanel)) {
-    oss << std::round(vPanel * 100);
-  }
-
-  // Only continue for MAX with O3 and NO2
-  if (payloadType != MAX_WITH_O3_NO2) {
-    return;
-  }
-
-  oss << ",";
-  // Working Electrode O3
-  if (IS_VOLT_VALID(o3WorkingElectrode)) {
-    oss << std::round(o3WorkingElectrode * 1000);
+  // PM 1.0 particle count
+  if (IS_PM_VALID(particleCount01)) {
+    oss << particleCount01;
   }
   oss << ",";
-  // Auxiliary Electrode O3
-  if (IS_VOLT_VALID(o3AuxiliaryElectrode)) {
-    oss << std::round(o3AuxiliaryElectrode * 1000);
+  // PM 2.5 particle count
+  if (IS_PM_VALID(particleCount02)) {
+    oss << particleCount02;
   }
   oss << ",";
-  // Working Electrode NO2
-  if (IS_VOLT_VALID(no2WorkingElectrode)) {
-    oss << std::round(no2WorkingElectrode * 1000);
+  // PM 5.0 particle count
+  if (IS_PM_VALID(particleCount50)) {
+    oss << particleCount50;
   }
   oss << ",";
-  // Auxiliary Electrode NO2
-  if (IS_VOLT_VALID(no2AuxiliaryElectrode)) {
-    oss << std::round(no2AuxiliaryElectrode * 1000);
+  // PM 10 particle count
+  if (IS_PM_VALID(particleCount10)) {
+    oss << particleCount10;
   }
   oss << ",";
-  // AFE Temperature
-  if (IS_VOLT_VALID(afeTemp)) {
-    oss << std::round(afeTemp * 10);
+  // PM 2.5 standard particle
+  if (IS_PM_VALID(pm25Sp)) {
+    oss << pm25Sp;
   }
 }
 
