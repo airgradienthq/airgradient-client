@@ -33,7 +33,7 @@ public:
   std::string getICCID();
   bool ensureClientConnection(bool reset);
   std::string httpFetchConfig();
-  bool httpPostMeasures(const std::string &payload);
+  bool httpPostMeasures(const std::string &payload, bool extendedPmMeasures = false);
   bool httpPostMeasures(int measureInterval, std::vector<OpenAirMaxPayload> data);
   bool mqttConnect();
   bool mqttDisconnect();

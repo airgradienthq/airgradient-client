@@ -17,6 +17,7 @@
 
 #define ONE_OPENAIR_POST_MEASURES_ENDPOINT "cts"
 #define OPENAIR_MAX_POST_MEASURES_ENDPOINT "cvn"
+#define POST_MEASURES_EXTENDED_PM_ENDPOINT "cpm"
 #ifdef ARDUINO
 #define POST_MEASURES_ENDPOINT ONE_OPENAIR_POST_MEASURES_ENDPOINT
 #else
@@ -156,11 +157,16 @@ std::string AirgradientCellularClient::httpFetchConfig() {
   return body;
 }
 
-bool AirgradientCellularClient::httpPostMeasures(const std::string &payload) {
-  // std::string url = buildPostMeasuresUrl();
+bool AirgradientCellularClient::httpPostMeasures(const std::string &payload,
+                                                 bool extendedPmMeasures) {
   char url[80] = {0};
-  sprintf(url, "http://%s/sensors/%s/%s", httpDomain.c_str(), serialNumber.c_str(),
-          POST_MEASURES_ENDPOINT);
+  if (extendedPmMeasures) {
+    sprintf(url, "http://%s/sensors/%s/%s", httpDomain.c_str(), serialNumber.c_str(),
+            POST_MEASURES_EXTENDED_PM_ENDPOINT);
+  } else {
+    sprintf(url, "http://%s/sensors/%s/%s", httpDomain.c_str(), serialNumber.c_str(),
+            POST_MEASURES_ENDPOINT);
+  }
   AG_LOGI(TAG, "Post measures to %s", url);
   AG_LOGI(TAG, "Payload: %s", payload.c_str());
 

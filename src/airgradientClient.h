@@ -45,6 +45,7 @@ public:
   virtual bool ensureClientConnection(bool reset);
   virtual std::string httpFetchConfig();
   virtual bool httpPostMeasures(const std::string &payload);
+  virtual bool httpPostMeasures(const std::string &payload, bool extendedPmMeasures);
   virtual bool httpPostMeasures(int measureInterval, std::vector<OpenAirMaxPayload> data);
   virtual bool mqttConnect();
   virtual bool mqttDisconnect();

@@ -29,6 +29,10 @@ std::string AirgradientClient::httpFetchConfig() { return std::string(); }
 
 bool AirgradientClient::httpPostMeasures(const std::string &payload) { return false; }
 
+bool AirgradientClient::httpPostMeasures(const std::string &payload, bool extendedPmMeasures) {
+  return false;
+}
+
 bool AirgradientClient::httpPostMeasures(int measureInterval, std::vector<OpenAirMaxPayload> data) {
   return false;
 }
