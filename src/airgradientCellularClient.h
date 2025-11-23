@@ -36,8 +36,8 @@ public:
   std::string getICCID();
   bool ensureClientConnection(bool reset);
   std::string httpFetchConfig();
-  bool httpPostMeasures(const std::string &payload);
-  bool httpPostMeasures(const AirgradientPayload &payload);
+  bool httpPostMeasures(const std::string &payload, const std::string &url);
+  bool httpPostMeasures(const AirgradientPayload &payload, bool extendedPmMeasures);
   bool mqttConnect();
   bool mqttConnect(const char *uri);
   bool mqttConnect(const std::string &host, int port, std::string username = "",
@@ -47,8 +47,8 @@ public:
   bool mqttPublishMeasures(const AirgradientPayload &payload);
 
 private:
-  std::string _getEndpoint();
-  void _serialize(std::ostringstream &oss, int rco2, int particleCount003, float pm01, float pm25,
+  std::string _getEndpoint(bool extendedPmMeasures);
+  void _serialize(std::ostringstream &oss, bool extendedPmMeasures, int rco2, int particleCount003, float pm01, float pm25,
                   float pm10, int tvoc, int nox, float atmp, float rhum, int signal,
                   float vBat = -1.0f, float vPanel = -1.0f, float o3WorkingElectrode = -1.0f,
                   float o3AuxiliaryElectrode = -1.0f, float no2WorkingElectrode = -1.0f,

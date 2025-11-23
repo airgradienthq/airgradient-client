@@ -66,6 +66,8 @@ public:
   virtual std::string httpFetchConfig();
   virtual bool httpPostMeasures(const std::string &payload);
   virtual bool httpPostMeasures(const AirgradientPayload &payload);
+  virtual bool httpPostMeasures(const std::string &payload, const std::string &url);
+  virtual bool httpPostMeasures(const AirgradientPayload &payload, bool extendedPmMeasures);
   virtual bool mqttConnect();
   virtual bool mqttConnect(const char *uri);
   virtual bool mqttConnect(const std::string &host, int port, std::string username = "", std::string password = "");
