@@ -23,6 +23,8 @@ void AirgradientClient::setHttpDomain(const std::string &target) { httpDomain = 
 
 void AirgradientClient::setHttpDomainDefault() { httpDomain = AIRGRADIENT_HTTP_DOMAIN; }
 
+void AirgradientClient::setExtendedPmMeasures(bool enable) {}
+
 bool AirgradientClient::isClientReady() { return clientReady; }
 
 void AirgradientClient::setClientReady(bool isReady) { clientReady = isReady; }
@@ -32,15 +34,6 @@ std::string AirgradientClient::httpFetchConfig() { return std::string(); }
 bool AirgradientClient::httpPostMeasures(const std::string &payload) { return false; }
 
 bool AirgradientClient::httpPostMeasures(const AirgradientPayload &payload) { return false; }
-
-bool AirgradientClient::httpPostMeasures(const std::string &payload, const std::string &url) {
-  return false;
-}
-
-bool AirgradientClient::httpPostMeasures(const AirgradientPayload &payload,
-                                         bool extendedPmMeasures) {
-  return false;
-}
 
 bool AirgradientClient::mqttConnect() { return false; }
 

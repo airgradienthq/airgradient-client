@@ -69,6 +69,8 @@ bool AirgradientCellularClient::begin(std::string sn, PayloadType pt) {
 
 void AirgradientCellularClient::setAPN(const std::string &apn) { _apn = apn; }
 
+void AirgradientCellularClient::setExtendedPmMeasures(bool enable) { _extendedPmMeasures = enable; }
+
 void AirgradientCellularClient::setNetworkRegistrationTimeoutMs(int timeoutMs) {
   _networkRegistrationTimeoutMs = timeoutMs;
   AG_LOGI(TAG, "Timeout set to %d seconds", (_networkRegistrationTimeoutMs / 1000));
@@ -160,9 +162,13 @@ std::string AirgradientCellularClient::httpFetchConfig() {
   return body;
 }
 
-bool AirgradientCellularClient::httpPostMeasures(const std::string &payload,
-                                                 const std::string &url) {
-  AG_LOGI(TAG, "Post measures to %s", url.c_str());
+bool AirgradientCellularClient::httpPostMeasures(const std::string &payload) {
+  // Format url
+  char url[80] = {0};
+  sprintf(url, "http://%s/sensors/%s/%s", httpDomain.c_str(), serialNumber.c_str(),
+          _getEndpoint().c_str());
+
+  AG_LOGI(TAG, "Post measures to %s", url);
   AG_LOGI(TAG, "Payload: %s", payload.c_str());
 
   auto result = cell_->httpPost(url, payload); // TODO: Define timeouts
@@ -190,8 +196,7 @@ bool AirgradientCellularClient::httpPostMeasures(const std::string &payload,
   return true;
 }
 
-bool AirgradientCellularClient::httpPostMeasures(const AirgradientPayload &payload,
-                                                 bool extendedPmMeasures) {
+bool AirgradientCellularClient::httpPostMeasures(const AirgradientPayload &payload) {
   // Build payload using oss, easier to manage if there's an invalid value that should not included
   std::ostringstream oss;
 
@@ -204,12 +209,11 @@ bool AirgradientCellularClient::httpPostMeasures(const AirgradientPayload &paylo
       // Seperator between measures cycle
       oss << ",";
       // Serialize each measurement
-      _serialize(oss, extendedPmMeasures, it->rco2, it->particleCount003, it->pm01, it->pm25,
-                 it->pm10, it->tvocRaw, it->noxRaw, it->atmp, it->rhum, payload.signal, it->vBat,
-                 it->vPanel, it->o3WorkingElectrode, it->o3AuxiliaryElectrode,
-                 it->no2WorkingElectrode, it->no2AuxiliaryElectrode, it->afeTemp,
-                 it->particleCount005, it->particleCount01, it->particleCount02,
-                 it->particleCount50, it->particleCount10, it->pm25Sp);
+      _serialize(oss, it->rco2, it->particleCount003, it->pm01, it->pm25, it->pm10, it->tvocRaw,
+                 it->noxRaw, it->atmp, it->rhum, payload.signal, it->vBat, it->vPanel,
+                 it->o3WorkingElectrode, it->o3AuxiliaryElectrode, it->no2WorkingElectrode,
+                 it->no2AuxiliaryElectrode, it->afeTemp, it->particleCount005, it->particleCount01,
+                 it->particleCount02, it->particleCount50, it->particleCount10, it->pm25Sp);
     }
   } else {
     // TODO: Add for OneOpenAir payload
@@ -218,12 +222,7 @@ bool AirgradientCellularClient::httpPostMeasures(const AirgradientPayload &paylo
   // Compile it
   std::string payloadStr = oss.str();
 
-  // Format url
-  char url[80] = {0};
-  sprintf(url, "http://%s/sensors/%s/%s", httpDomain.c_str(), serialNumber.c_str(),
-          _getEndpoint(extendedPmMeasures).c_str());
-
-  return httpPostMeasures(payloadStr, url);
+  return httpPostMeasures(payloadStr);
 }
 
 bool AirgradientCellularClient::mqttConnect() { return mqttConnect(mqttDomain, mqttPort); }
@@ -318,9 +317,9 @@ bool AirgradientCellularClient::mqttPublishMeasures(const AirgradientPayload &pa
 }
 
 void AirgradientCellularClient::_serialize(
-    std::ostringstream &oss, bool extendedPmMeasures, int rco2, int particleCount003, float pm01,
-    float pm25, float pm10, int tvoc, int nox, float atmp, float rhum, int signal, float vBat,
-    float vPanel, float o3WorkingElectrode, float o3AuxiliaryElectrode, float no2WorkingElectrode,
+    std::ostringstream &oss, int rco2, int particleCount003, float pm01, float pm25, float pm10,
+    int tvoc, int nox, float atmp, float rhum, int signal, float vBat, float vPanel,
+    float o3WorkingElectrode, float o3AuxiliaryElectrode, float no2WorkingElectrode,
     float no2AuxiliaryElectrode, float afeTemp, int particleCount005, int particleCount01,
     int particleCount02, int particleCount50, int particleCount10, float pm25Sp) {
   // CO2
@@ -413,7 +412,7 @@ void AirgradientCellularClient::_serialize(
     }
   }
 
-  if (!extendedPmMeasures) {
+  if (!_extendedPmMeasures) {
     return;
   }
 
@@ -450,8 +449,8 @@ void AirgradientCellularClient::_serialize(
   }
 }
 
-std::string AirgradientCellularClient::_getEndpoint(bool extendedPmMeasures) {
-  if (extendedPmMeasures) {
+std::string AirgradientCellularClient::_getEndpoint() {
+  if (_extendedPmMeasures) {
     return "cpm"; // special case
   }
 

@@ -60,14 +60,13 @@ public:
 
   virtual bool begin(std::string sn, PayloadType pt);
   virtual void setAPN(const std::string &apn);
+  virtual void setExtendedPmMeasures(bool enable);
   virtual void setNetworkRegistrationTimeoutMs(int timeoutMs);
   virtual std::string getICCID();
   virtual bool ensureClientConnection(bool reset);
   virtual std::string httpFetchConfig();
   virtual bool httpPostMeasures(const std::string &payload);
   virtual bool httpPostMeasures(const AirgradientPayload &payload);
-  virtual bool httpPostMeasures(const std::string &payload, const std::string &url);
-  virtual bool httpPostMeasures(const AirgradientPayload &payload, bool extendedPmMeasures);
   virtual bool mqttConnect();
   virtual bool mqttConnect(const char *uri);
   virtual bool mqttConnect(const std::string &host, int port, std::string username = "", std::string password = "");

@@ -25,6 +25,7 @@ private:
   std::string _iccid = "";
   CellularModule *cell_ = nullptr;
   int _networkRegistrationTimeoutMs = (3 * 60000);
+  bool _extendedPmMeasures = false;
 
 public:
   AirgradientCellularClient(CellularModule *cellularModule);
@@ -32,12 +33,13 @@ public:
 
   bool begin(std::string sn, PayloadType pt);
   void setAPN(const std::string &apn);
+  void setExtendedPmMeasures(bool enable);
   void setNetworkRegistrationTimeoutMs(int timeoutMs);
   std::string getICCID();
   bool ensureClientConnection(bool reset);
   std::string httpFetchConfig();
-  bool httpPostMeasures(const std::string &payload, const std::string &url);
-  bool httpPostMeasures(const AirgradientPayload &payload, bool extendedPmMeasures);
+  bool httpPostMeasures(const std::string &payload);
+  bool httpPostMeasures(const AirgradientPayload &payload);
   bool mqttConnect();
   bool mqttConnect(const char *uri);
   bool mqttConnect(const std::string &host, int port, std::string username = "",
@@ -47,8 +49,8 @@ public:
   bool mqttPublishMeasures(const AirgradientPayload &payload);
 
 private:
-  std::string _getEndpoint(bool extendedPmMeasures);
-  void _serialize(std::ostringstream &oss, bool extendedPmMeasures, int rco2, int particleCount003, float pm01, float pm25,
+  std::string _getEndpoint();
+  void _serialize(std::ostringstream &oss, int rco2, int particleCount003, float pm01, float pm25,
                   float pm10, int tvoc, int nox, float atmp, float rhum, int signal,
                   float vBat = -1.0f, float vPanel = -1.0f, float o3WorkingElectrode = -1.0f,
                   float o3AuxiliaryElectrode = -1.0f, float no2WorkingElectrode = -1.0f,
