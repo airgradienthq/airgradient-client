@@ -25,6 +25,7 @@ private:
   std::string _iccid = "";
   CellularModule *cell_ = nullptr;
   int _networkRegistrationTimeoutMs = (3 * 60000);
+  bool _extendedPmMeasures = false;
 
 public:
   AirgradientCellularClient(CellularModule *cellularModule);
@@ -32,6 +33,7 @@ public:
 
   bool begin(std::string sn, PayloadType pt);
   void setAPN(const std::string &apn);
+  void setExtendedPmMeasures(bool enable);
   void setNetworkRegistrationTimeoutMs(int timeoutMs);
   std::string getICCID();
   bool ensureClientConnection(bool reset);
@@ -40,7 +42,8 @@ public:
   bool httpPostMeasures(const AirgradientPayload &payload);
   bool mqttConnect();
   bool mqttConnect(const char *uri);
-  bool mqttConnect(const std::string &host, int port, std::string username = "", std::string password = "");
+  bool mqttConnect(const std::string &host, int port, std::string username = "",
+                   std::string password = "");
   bool mqttDisconnect();
   bool mqttPublishMeasures(const std::string &payload);
   bool mqttPublishMeasures(const AirgradientPayload &payload);
@@ -51,7 +54,9 @@ private:
                   float pm10, int tvoc, int nox, float atmp, float rhum, int signal,
                   float vBat = -1.0f, float vPanel = -1.0f, float o3WorkingElectrode = -1.0f,
                   float o3AuxiliaryElectrode = -1.0f, float no2WorkingElectrode = -1.0f,
-                  float no2AuxiliaryElectrode = -1.0f, float afeTemp = -1.0f);
+                  float no2AuxiliaryElectrode = -1.0f, float afeTemp = -1.0f,
+                  int particleCount005 = -1, int particleCount01 = -1, int particleCount02 = -1,
+                  int particleCount50 = -1, int particleCount10 = -1, float pm25Sp = -1.0f);
 };
 
 #endif // ESP8266

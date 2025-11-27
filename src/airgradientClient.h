@@ -23,9 +23,15 @@ public:
   struct MaxSensorPayload {
     int rco2;
     int particleCount003;
+    int particleCount005;
+    int particleCount01;
+    int particleCount02;
+    int particleCount50;
+    int particleCount10;
     float pm01;
     float pm25;
     float pm10;
+    float pm25Sp;
     int tvocRaw;
     int noxRaw;
     float atmp;
@@ -54,6 +60,7 @@ public:
 
   virtual bool begin(std::string sn, PayloadType pt);
   virtual void setAPN(const std::string &apn);
+  virtual void setExtendedPmMeasures(bool enable);
   virtual void setNetworkRegistrationTimeoutMs(int timeoutMs);
   virtual std::string getICCID();
   virtual bool ensureClientConnection(bool reset);

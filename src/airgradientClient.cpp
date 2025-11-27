@@ -23,6 +23,8 @@ void AirgradientClient::setHttpDomain(const std::string &target) { httpDomain = 
 
 void AirgradientClient::setHttpDomainDefault() { httpDomain = AIRGRADIENT_HTTP_DOMAIN; }
 
+void AirgradientClient::setExtendedPmMeasures(bool enable) {}
+
 bool AirgradientClient::isClientReady() { return clientReady; }
 
 void AirgradientClient::setClientReady(bool isReady) { clientReady = isReady; }
