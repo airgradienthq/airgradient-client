@@ -254,11 +254,12 @@ void AirgradientWifiClient::_serialize(JsonDocument &doc, const MaxSensorPayload
   }
 
   // Check and add TVOC and NOx values
+  // NOTE: currently MAX publish tvoc and nox raw through the index field
   if (IS_TVOC_VALID(payload->tvocRaw)) {
-    doc[JSON_PROP_TVOC_RAW] = payload->tvocRaw;
+    doc[JSON_PROP_TVOC] = payload->tvocRaw;
   }
   if (IS_NOX_VALID(payload->noxRaw)) {
-    doc[JSON_PROP_NOX_RAW] = payload->noxRaw;
+    doc[JSON_PROP_NOX] = payload->noxRaw;
   }
 
   // Check and add Temperature and Humidity
