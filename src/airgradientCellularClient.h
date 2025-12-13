@@ -16,6 +16,8 @@
 #include "airgradientClient.h"
 #include "cellularModule.h"
 
+#include "CoapPacket.h"
+
 #define DEFAULT_AIRGRADIENT_APN "iot.1nce.net"
 
 class AirgradientCellularClient : public AirgradientClient {
@@ -47,6 +49,10 @@ public:
   bool mqttDisconnect();
   bool mqttPublishMeasures(const std::string &payload);
   bool mqttPublishMeasures(const AirgradientPayload &payload);
+  bool coapConnect();
+  bool coapDisconnect();
+  std::string coapFetchConfig();
+  bool coapPostMeasures(const std::string &payload);
 
 private:
   std::string _getEndpoint();
@@ -57,6 +63,23 @@ private:
                   float no2AuxiliaryElectrode = -1.0f, float afeTemp = -1.0f,
                   int particleCount005 = -1, int particleCount01 = -1, int particleCount02 = -1,
                   int particleCount50 = -1, int particleCount10 = -1, float pm25Sp = -1.0f);
+
+  // Single CoAP request attempt - handles Piggyback and Separate ACK
+  bool _coapRequest(const std::vector<uint8_t> &reqBuffer,
+                    uint16_t expectedMessageId,
+                    const uint8_t *expectedToken,
+                    uint8_t expectedTokenLen,
+                    CoapPacket::CoapPacket *respPacket,
+                    int timeoutMs = 60000);
+
+  // CoAP request with retry logic (up to 3 attempts)
+  bool _coapRequestWithRetry(const std::vector<uint8_t> &reqBuffer,
+                             uint16_t expectedMessageId,
+                             const uint8_t *expectedToken,
+                             uint8_t expectedTokenLen,
+                             CoapPacket::CoapPacket *respPacket,
+                             int timeoutMs = 60000,
+                             int maxRetries = 3);
 };
 
 #endif // ESP8266
