@@ -66,6 +66,10 @@ public:
   virtual CellReturnStatus mqttPublish(const std::string &topic, const std::string &payload,
                                        int qos = 1, int retain = 0, int timeoutS = 15);
 
+
+  virtual CellReturnStatus udpConnect(const std::string &host, int port = 5683);
+  virtual CellReturnStatus udpDisconnect();
+
   // Generic functions
 
   /**

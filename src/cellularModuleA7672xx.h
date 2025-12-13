@@ -98,10 +98,14 @@ public:
   CellReturnStatus mqttPublish(const std::string &topic, const std::string &payload, int qos = 1,
                                int retain = 0, int timeoutS = 15);
 
+  CellReturnStatus udpConnect(const std::string &host, int port = 5683);
+  CellReturnStatus udpDisconnect();
+
 private:
   const int DEFAULT_HTTP_CONNECT_TIMEOUT = 120; // seconds
   const int DEFAULT_HTTP_RESPONSE_TIMEOUT = 20; // seconds
   const int HTTPREAD_CHUNK_SIZE = CONFIG_HTTPREAD_CHUNK_SIZE;
+  const int UDP_LINK_ID = 0;
 
   // Network Registration implementation for each state
   NetworkRegistrationState _implCheckModuleReady();

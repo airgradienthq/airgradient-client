@@ -67,6 +67,13 @@ CellReturnStatus CellularModule::mqttPublish(const std::string &topic, const std
   return CellReturnStatus::Error;
 }
 
+CellReturnStatus CellularModule::udpConnect(const std::string &host, int port) {
+  return CellReturnStatus::Error;
+}
+
+CellReturnStatus CellularModule::udpDisconnect() { return CellReturnStatus::Error; }
+
+
 int CellularModule::csqToDbm(int csq) {
   if (csq == 99) {
     // Unknown or undetectable

@@ -815,6 +815,45 @@ CellReturnStatus CellularModuleA7672XX::mqttPublish(const std::string &topic,
   return CellReturnStatus::Ok;
 }
 
+CellReturnStatus CellularModuleA7672XX::udpConnect(const std::string &host, int port) {
+  AG_LOGI(TAG, "Establish UDP connection to %s:%d", host.c_str(), port);
+
+  auto status = _startUDP();
+  if (status != CellReturnStatus::Ok) {
+    return status;
+  }
+
+  status = _connectUDP(host, port);
+  if (status != CellReturnStatus::Ok) {
+    return status;
+  }
+
+  at_->sendAT("+CIPRXGET=1");
+  ATCommandHandler::Response resp = at_->waitResponse();
+  if (resp != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "Failed set UDP socket receive mode to manual");
+    return CellReturnStatus::Failed;
+  }
+
+  AG_LOGI(TAG, "Success establish UDP connection");
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::udpDisconnect() {
+  auto status = _disconnectUDP();
+  if (status != CellReturnStatus::Ok) {
+    return status;
+  }
+
+  status = _stopUDP();
+  if (status != CellReturnStatus::Ok) {
+    return status;
+  }
+
+  AG_LOGI(TAG, "Success disconnect UDP connection");
+  return CellReturnStatus::Ok;
+}
+
 CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implCheckModuleReady() {
   if (at_->testAT() == false) {
     REGIS_RETRY_DELAY();
@@ -1353,6 +1392,85 @@ CellReturnStatus CellularModuleA7672XX::_httpTerminate() {
   } else if (response == ATCommandHandler::ExpArg2) {
     AG_LOGW(TAG, "Error stop module HTTP service");
     return CellReturnStatus::Error;
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_startUDP() {
+  at_->sendAT("+NETOPEN");
+  // auto response = at_->waitResponse(60000);
+  // if (response == ATCommandHandler::Timeout) {
+  //   AG_LOGE(TAG, "Timeout open UDP network");
+  //   return CellReturnStatus::Timeout;
+  // } else if (response == ATCommandHandler::ExpArg2) {
+  //   AG_LOGE(TAG, "Network open failed or already open");
+  //   return CellReturnStatus::Error;
+  // }
+
+  // It will return OK first then +NETOPEN
+
+  auto response = at_->waitResponse(60000, "+NETOPEN:");
+  if (response == ATCommandHandler::Timeout) {
+    AG_LOGE(TAG, "Timeout start UDP service");
+    return CellReturnStatus::Timeout;
+  } else if (response == ATCommandHandler::ExpArg2) {
+    AG_LOGE(TAG, "Error start UDP service");
+    return CellReturnStatus::Error;
+  }
+
+  char result[1];
+  at_->waitAndRecvRespLine(result, 1);
+  if (result[0] != '0') {
+    AG_LOGE(TAG, "Failed to open UDP network with code %c", result);
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_stopUDP() {
+  at_->sendAT("+NETCLOSE");
+  auto response = at_->waitResponse(60000, "+NETCLOSE:");
+  if (response == ATCommandHandler::Timeout) {
+    AG_LOGE(TAG, "Timeout stop UDP service");
+    return CellReturnStatus::Timeout;
+  } else if (response == ATCommandHandler::ExpArg2) {
+    AG_LOGE(TAG, "Error stop UDP service");
+    return CellReturnStatus::Error;
+  }
+
+  char result[1];
+  at_->waitAndRecvRespLine(result, 1);
+  if (result[0] != '0') {
+    AG_LOGE(TAG, "Failed to stop UDP service with code %c", result);
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_connectUDP(const std::string &host, int port) {
+  char cmd[128];
+  snprintf(cmd, sizeof(cmd), "+CIPOPEN=%d,\"UDP\",\"%s\",%d,0", UDP_LINK_ID, host.c_str(), port);
+
+  at_->sendAT(cmd);
+  ATCommandHandler::Response resp = at_->waitResponse(10000);
+  if (resp != ATCommandHandler::ExpArg1) {
+    Serial.println("Failed to open UDP socket");
+    return CellReturnStatus::Failed;
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_disconnectUDP() {
+  char cmd[32];
+  snprintf(cmd, sizeof(cmd), "+CIPCLOSE=%d", UDP_LINK_ID);
+
+  at_->sendAT(cmd);
+  ATCommandHandler::Response resp = at_->waitResponse(5000);
+  if (resp != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "Failed to close UDP socket");
+    return CellReturnStatus::Failed;
   }
 
   return CellReturnStatus::Ok;
