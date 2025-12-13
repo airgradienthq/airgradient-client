@@ -44,6 +44,12 @@ void ATCommandHandler::sendRaw(const char *raw) {
   AT_YIELD();
 }
 
+void ATCommandHandler::sendRaw(const char *buf, int size) {
+  agSerial_->write(buf, size);
+  agSerial_->print("\r\n");
+  AT_YIELD();
+}
+
 ATCommandHandler::Response ATCommandHandler::waitResponse(uint32_t timeoutMs, const char *expArg1,
                                                           const char *expArg2,
                                                           const char *expArg3) {
