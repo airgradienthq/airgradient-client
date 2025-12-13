@@ -73,6 +73,14 @@ CellReturnStatus CellularModule::udpConnect(const std::string &host, int port) {
 
 CellReturnStatus CellularModule::udpDisconnect() { return CellReturnStatus::Error; }
 
+CellReturnStatus CellularModule::udpSend(const UdpPacket &packet, const std::string &host,
+                                         uint16_t port) {
+  return CellReturnStatus::Error;
+}
+
+CellResult<CellularModule::UdpPacket> CellularModule::udpReceive(uint32_t timeout) {
+  return CellResult<UdpPacket>();
+}
 
 int CellularModule::csqToDbm(int csq) {
   if (csq == 99) {

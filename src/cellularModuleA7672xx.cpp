@@ -854,6 +854,136 @@ CellReturnStatus CellularModuleA7672XX::udpDisconnect() {
   return CellReturnStatus::Ok;
 }
 
+CellReturnStatus CellularModuleA7672XX::udpSend(const CellularModule::UdpPacket &packet,
+                                                const std::string &host, uint16_t port) {
+  // Send via AT+CIPSEND with hex mode
+  char cmd[64];
+  snprintf(cmd, sizeof(cmd), "+CIPSEND=%d,%d,\"%s\",%d", UDP_LINK_ID, packet.size, host.c_str(),
+           port);
+
+  // Serial.printf("[CoAP] Sending %d bytes to %s:%d...\n", bufferSize, host, port);
+
+  at_->sendAT(cmd);
+  auto response = at_->waitResponse(5000, ">", "+CIPERROR:");
+  if (response != ATCommandHandler::ExpArg1) {
+    // TODO: Get the CIPERROR error number and timeout
+    AG_LOGW(TAG, "Error +CIPSEND wait for \">\" response");
+    return CellReturnStatus::Error;
+  }
+
+  // Send the hex data
+  at_->sendRaw((const char *)packet.buff.data(), packet.size);
+  response = at_->waitResponse(5000, "+CIPSEND: 0,"); // until connection link
+  if (response != ATCommandHandler::ExpArg1) {
+    AG_LOGW(TAG, "Error +CIPSEND wait for \"+CIPSEND: 0,\" response");
+    return CellReturnStatus::Error;
+  }
+
+  // Confirm CIPSEND sent length
+  std::string data;
+  at_->waitAndRecvRespLine(data);
+  // Sanity check if value is empty
+  if (data.empty()) {
+    AG_LOGW(TAG, "+CIPSEND result value empty");
+    return CellReturnStatus::Error;
+  }
+  int rsl = 0, cnf = 0;
+  Common::splitByDelimiter(data, &rsl, &cnf);
+  if (rsl != cnf) {
+    ESP_LOGE(TAG, "CIPSEND expected bytes send and confirmation different (rsl:%d;cnf:%d)", rsl,
+             cnf);
+    return CellReturnStatus::Error;
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t timeout) {
+  CellResult<CellularModule::UdpPacket> result;
+  result.status = CellReturnStatus::Error;
+  ATCommandHandler::Response response;
+
+  // Wait for URC notification
+  response = at_->waitResponse(9000, "+CIPRXGET: 1,0");
+  if (response != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "Wait +CIPRXGET URC timeout");
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  at_->clearBuffer();
+
+  // Get packet length available in buffer CIPRXGET=4 (query available data length)
+  char buf[32];
+  snprintf(buf, sizeof(buf), "+CIPRXGET=4,%d", UDP_LINK_ID);
+  at_->sendAT(buf);
+
+  // Response format: +CIPRXGET: 4,<link_num>,<data_len>
+  memset(buf, 0, 32);
+  snprintf(buf, 32, "+CIPRXGET: 4,%d,", UDP_LINK_ID);
+  response = at_->waitResponse(9000, buf, "+IP ERROR:");
+  if (response != ATCommandHandler::ExpArg1) {
+    // TODO: Check +IP ERROR err_info
+    AG_LOGE(TAG, "Error CIPRXGET=4 to receive UDP packet total length");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  // Get the <data_len>
+  memset(buf, 0, 32);
+  at_->waitAndRecvRespLine(buf, 32);
+  char* end;
+  int udpPacketSize = 0;
+  udpPacketSize = strtol(buf, &end, 10);
+  if (udpPacketSize == 0 || end == buf) {
+    AG_LOGE(TAG, "No available data on the buffer");
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+  AG_LOGI(TAG, "UDP packet size in buffer: %d", udpPacketSize);
+
+  // Retrieve packet from buffer
+  memset(buf, 0, 32);
+  snprintf(buf, 32, "+CIPRXGET=2,%d", UDP_LINK_ID); // TODO: Add the length expected to retrieve
+  at_->sendAT(buf);
+
+  // Response format: +CIPRXGET: 2,<link_num>,<read_len>,<rest_len>
+  memset(buf, 0, 32);
+  snprintf(buf, 32, "+CIPRXGET: 2,%d,", UDP_LINK_ID); // until <link_num>,
+  response = at_->waitResponse(5000, buf);
+  if (response != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "Failed to retrieve UDP packet from buffer (CIPRXGET:3)");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+  // Get the <read_len> and <rest_len>
+  std::string tmp;
+  at_->waitAndRecvRespLine(tmp);
+  // Sanity check if value is empty
+  if (tmp.empty()) {
+    AG_LOGW(TAG, "Timeout wait the rest of \"+CIPRXGET:3\" response");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+  int readLen = 0, restLen = 0; // NOTE: Not used for now
+  Common::splitByDelimiter(tmp, &readLen, &restLen);
+  AG_LOGI(TAG, "read_len: %d | rest_len: %d", readLen, restLen);
+
+  // Retrieve the actual packet
+  char udpPacket[500];
+  memset(udpPacket, 0, 500);
+  if ( at_->waitAndRecvRespLine(udpPacket, 500) == -1) {
+    AG_LOGE(TAG, "Failed retrieve UDP packet from buffer");
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  result.data.buff.assign(udpPacket, udpPacket + udpPacketSize);
+  result.data.size = udpPacketSize;
+  result.status = CellReturnStatus::Ok;
+  return result;
+}
+
 CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implCheckModuleReady() {
   if (at_->testAT() == false) {
     REGIS_RETRY_DELAY();

@@ -100,6 +100,9 @@ public:
 
   CellReturnStatus udpConnect(const std::string &host, int port = 5683);
   CellReturnStatus udpDisconnect();
+  CellReturnStatus udpSend(const CellularModule::UdpPacket &packet,
+                                                const std::string &host, uint16_t port);
+  CellResult<CellularModule::UdpPacket> udpReceive(uint32_t timeout);
 
 private:
   const int DEFAULT_HTTP_CONNECT_TIMEOUT = 120; // seconds
@@ -134,6 +137,10 @@ private:
   CellReturnStatus _httpAction(int httpMethodCode, int connectionTimeout, int responseTimeout,
                                int *oResponseCode, int *oBodyLen);
   CellReturnStatus _httpTerminate();
+  CellReturnStatus _startUDP();
+  CellReturnStatus _stopUDP();
+  CellReturnStatus _connectUDP(const std::string &host, int port);
+  CellReturnStatus _disconnectUDP();
 
   int _mapCellTechToMode(CellTechnology ct);
   std::string _mapCellTechToNetworkRegisCmd(CellTechnology ct);
