@@ -942,45 +942,91 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
   }
   AG_LOGI(TAG, "UDP packet size in buffer: %d", udpPacketSize);
 
-  // Retrieve packet from buffer
-  memset(buf, 0, 32);
-  snprintf(buf, 32, "+CIPRXGET=2,%d", UDP_LINK_ID); // TODO: Add the length expected to retrieve
-  at_->sendAT(buf);
+  // Allocate dynamic buffer to hold the complete UDP packet
+  char* udpPacket = new char[udpPacketSize];
+  memset(udpPacket, 0, udpPacketSize);
 
-  // Response format: +CIPRXGET: 2,<link_num>,<read_len>,<rest_len>
-  memset(buf, 0, 32);
-  snprintf(buf, 32, "+CIPRXGET: 2,%d,", UDP_LINK_ID); // until <link_num>,
-  response = at_->waitResponse(5000, buf);
-  if (response != ATCommandHandler::ExpArg1) {
-    AG_LOGE(TAG, "Failed to retrieve UDP packet from buffer (CIPRXGET:3)");
-    result.status = CellReturnStatus::Error;
-    return result;
-  }
-  // Get the <read_len> and <rest_len>
-  std::string tmp;
-  at_->waitAndRecvRespLine(tmp);
-  // Sanity check if value is empty
-  if (tmp.empty()) {
-    AG_LOGW(TAG, "Timeout wait the rest of \"+CIPRXGET:3\" response");
-    result.status = CellReturnStatus::Error;
-    return result;
-  }
-  int readLen = 0, restLen = 0; // NOTE: Not used for now
-  Common::splitByDelimiter(tmp, &readLen, &restLen);
-  AG_LOGI(TAG, "read_len: %d | rest_len: %d", readLen, restLen);
+  // Retrieve packet from buffer in chunks
+  int offset = 0;
+  int totalReceived = 0;
+  char* chunkBuf = new char[HTTPREAD_CHUNK_SIZE + 1];
 
-  // Retrieve the actual packet
-  char udpPacket[500];
-  memset(udpPacket, 0, 500);
-  if ( at_->waitAndRecvRespLine(udpPacket, 500) == -1) {
-    AG_LOGE(TAG, "Failed retrieve UDP packet from buffer");
+  do {
+    // Determine chunk size to request (last chunk might be smaller)
+    int requestSize = std::min(HTTPREAD_CHUNK_SIZE, udpPacketSize - totalReceived);
+
+    memset(buf, 0, 32);
+    snprintf(buf, 32, "+CIPRXGET=2,%d,%d", UDP_LINK_ID, requestSize);
+    at_->sendAT(buf);
+
+    // Response format: +CIPRXGET: 2,<link_num>,<read_len>,<rest_len>
+    memset(buf, 0, 32);
+    snprintf(buf, 32, "+CIPRXGET: 2,%d,", UDP_LINK_ID); // until <link_num>,
+    response = at_->waitResponse(5000, buf);
+    if (response != ATCommandHandler::ExpArg1) {
+      AG_LOGE(TAG, "Failed to retrieve UDP packet chunk from buffer (CIPRXGET:2)");
+      result.status = CellReturnStatus::Error;
+      delete[] udpPacket;
+      delete[] chunkBuf;
+      return result;
+    }
+
+    // Get the <read_len> and <rest_len>
+    std::string tmp;
+    at_->waitAndRecvRespLine(tmp);
+    // Sanity check if value is empty
+    if (tmp.empty()) {
+      AG_LOGW(TAG, "Timeout wait the rest of \"+CIPRXGET:2\" response");
+      result.status = CellReturnStatus::Error;
+      delete[] udpPacket;
+      delete[] chunkBuf;
+      return result;
+    }
+
+    int readLen = 0, restLen = 0;
+    Common::splitByDelimiter(tmp, &readLen, &restLen);
+    AG_LOGD(TAG, "read_len: %d | rest_len: %d", readLen, restLen);
+
+    // Retrieve the actual chunk data
+    memset(chunkBuf, 0, HTTPREAD_CHUNK_SIZE + 1);
+    int receivedActual = at_->retrieveBuffer(chunkBuf, readLen);
+    if (receivedActual != readLen) {
+      AG_LOGE(TAG, "Failed retrieve UDP chunk. Expected: %d, Received: %d", readLen, receivedActual);
+      result.status = CellReturnStatus::Failed;
+      delete[] udpPacket;
+      delete[] chunkBuf;
+      return result;
+    }
+
+    // Copy chunk to result buffer
+    memcpy(udpPacket + offset, chunkBuf, readLen);
+    offset += readLen;
+    totalReceived += readLen;
+
+    AG_LOGV(TAG, "Received UDP chunk: %d bytes, total: %d/%d", readLen, totalReceived, udpPacketSize);
+
+    // Continue until no more data remains
+    if (restLen == 0 || totalReceived >= udpPacketSize) {
+      break;
+    }
+
+  } while (totalReceived < udpPacketSize);
+
+  delete[] chunkBuf;
+
+  // Verify received all expected data
+  if (totalReceived != udpPacketSize) {
+    AG_LOGE(TAG, "Incomplete UDP packet received. Expected: %d, Got: %d", udpPacketSize, totalReceived);
     result.status = CellReturnStatus::Failed;
+    delete[] udpPacket;
     return result;
   }
 
   result.data.buff.assign(udpPacket, udpPacket + udpPacketSize);
   result.data.size = udpPacketSize;
   result.status = CellReturnStatus::Ok;
+
+  delete[] udpPacket;
   return result;
 }
 
