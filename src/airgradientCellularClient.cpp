@@ -353,7 +353,18 @@ std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
     return {};
   }
 
-  // TODO: define status code here to decide fetch success or haven't registered based on CoAP code
+  // Check request response code
+  uint8_t codeClass = CoapPacket::getCodeClass(responsePacket.code);
+  uint8_t codeDetail = CoapPacket::getCodeDetail(responsePacket.code);
+  if (codeClass != 2) {
+    AG_LOGE(TAG, "CoAP fetch configuration response failed (%d.%02d)", codeClass, codeDetail);
+    if (codeClass == 4) {
+      // Return code 400 means device not registered on ag server
+      registeredOnAgServer = false;
+    }
+    lastFetchConfigSucceed = false;
+    return {};
+  }
 
   std::string response(responsePacket.payload.begin(), responsePacket.payload.end());
   AG_LOGI(TAG, "Received configuration: (%d) %s", response.length(), response.c_str());
@@ -398,16 +409,30 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
 
   CoapPacket::CoapPacket responsePacket;
   bool success = _coapRequestWithRetry(buffer, messageId, token, 2, &responsePacket);
+  if (!success) {
+    AG_LOGE(TAG, "CoAP post measures request failed");
+    lastPostMeasuresSucceed = false;
+    return false;
+  }
 
-  // TODO: Define status code from CoAP code
-  // TODO: Define propse clientReady state for CoAP
+  // Check request response code
+  uint8_t codeClass = CoapPacket::getCodeClass(responsePacket.code);
+  uint8_t codeDetail = CoapPacket::getCodeDetail(responsePacket.code);
+  if (codeClass != 2) {
+    AG_LOGE(TAG, "CoAP post measures response failed (%d.%02d)", codeClass, codeDetail);
+    lastPostMeasuresSucceed = false;
+    return false;
+  }
 
+  AG_LOGI(TAG, "CoAP post measures response success (%d.%02d)", codeClass, codeDetail);
   lastPostMeasuresSucceed = true;
+
+  // TODO: Define propse clientReady state for CoAP
 
   // Handling disconnection decision
   _coapDisconnect(keepConnection);
 
-  return success;
+  return true;
 }
 
 bool AirgradientCellularClient::_coapConnect() {
@@ -432,11 +457,12 @@ void AirgradientCellularClient::_coapDisconnect(bool keepConnection) {
   }
 
   if (cell_->udpDisconnect() == CellReturnStatus::Ok) {
+    _isCoapConnected = false;
     return;
   }
 
   AG_LOGI(TAG, "Failed disconnect to CoAP server");
-  _isCoapConnected = false;
+    _isCoapConnected = true;
   // TODO: Do a force disconnection or something
 }
 
@@ -478,7 +504,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     return false;
   }
 
-  AG_LOGI(TAG, "Message ID validated");
+  AG_LOGD(TAG, "Message ID validated");
 
   // 6. Handle response type and validate token appropriately
   if (respPacket->type == CoapPacket::CoapType::ACK &&
@@ -517,7 +543,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
       }
     }
 
-    AG_LOGI(TAG, "Separate response received and token validated");
+    AG_LOGD(TAG, "Separate response received and token validated");
 
     // If separate response is CON, send ACK back
     if (respPacket->type == CoapPacket::CoapType::CON) {
@@ -538,7 +564,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
         ackPacket.buff = std::move(ackBuffer);
 
         if (cell_->udpSend(ackPacket, coapDomain, coapPort) == CellReturnStatus::Ok) {
-          AG_LOGI(TAG, "ACK sent for separate CON response");
+          AG_LOGD(TAG, "ACK sent for separate CON response");
         } else {
           AG_LOGW(TAG, "Failed to send ACK for separate CON response");
         }
@@ -562,11 +588,11 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
       }
     }
 
-    AG_LOGI(TAG, "Response token validated");
+    AG_LOGD(TAG, "Response token validated");
 
     // If CON response, send ACK
     if (respPacket->type == CoapPacket::CoapType::CON) {
-      AG_LOGI(TAG, "Received CON response, sending ACK...");
+      AG_LOGD(TAG, "Received CON response, sending ACK...");
 
       // Build and send ACK (ACK with EMPTY code, no token per RFC 7252)
       CoapPacket::CoapBuilder ackBuilder;
@@ -594,17 +620,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     // Otherwise it's a piggyback ACK (Type=ACK with response code) - no ACK needed
   }
 
-  // 7. Check response code for success (2.xx codes)
-  uint8_t codeClass = CoapPacket::getCodeClass(respPacket->code);
-  uint8_t codeDetail = CoapPacket::getCodeDetail(respPacket->code);
-
-  // TODO: Don't do this here should be decided by caller
-  if (codeClass != 2) {
-    AG_LOGW(TAG, "CoAP response code not success: %d.%02d", codeClass, codeDetail);
-    return false;
-  }
-
-  AG_LOGI(TAG, "CoAP request successful (code %d.%02d)", codeClass, codeDetail);
+  AG_LOGI(TAG, "CoAP request successful");
   return true;
 }
 
