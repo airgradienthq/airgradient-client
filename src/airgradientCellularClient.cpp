@@ -339,7 +339,7 @@ std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
                  .setUriPath(serialNumber)
                  .buildBuffer(buffer);
   if (err != CoapPacket::CoapError::OK) {
-    AG_LOGE(TAG, "CoAP fetch config packet build failed %d", CoapPacket::getErrorMessage(err));
+    AG_LOGE(TAG, "CoAP fetch config packet build failed %s", CoapPacket::getErrorMessage(err));
     return {};
   }
 
@@ -399,7 +399,7 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
                  .setPayload(payload)
                  .buildBuffer(buffer);
   if (err != CoapPacket::CoapError::OK) {
-    AG_LOGE(TAG, "CoAP post measures packet build failed %d", CoapPacket::getErrorMessage(err));
+    AG_LOGE(TAG, "CoAP post measures packet build failed %s", CoapPacket::getErrorMessage(err));
     lastPostMeasuresSucceed = false;
     return false;
   }

@@ -940,7 +940,7 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
     result.status = CellReturnStatus::Failed;
     return result;
   }
-  AG_LOGI(TAG, "UDP packet size in buffer: %d", udpPacketSize);
+  AG_LOGI(TAG, "UDP packet size in buffer: %d. Retrieving buffer... ", udpPacketSize);
 
   // Allocate dynamic buffer to hold the complete UDP packet
   char* udpPacket = new char[udpPacketSize];
