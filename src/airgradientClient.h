@@ -73,10 +73,8 @@ public:
   virtual bool mqttDisconnect();
   virtual bool mqttPublishMeasures(const std::string &payload);
   virtual bool mqttPublishMeasures(const AirgradientPayload &payload);
-  virtual bool coapConnect();
-  virtual bool coapDisconnect();
-  virtual std::string coapFetchConfig();
-  virtual bool coapPostMeasures(const std::string &payload);
+  virtual std::string coapFetchConfig(bool keepConnection = false);
+  virtual bool coapPostMeasures(const std::string &payload, bool keepConnection = false);
 
   // Implemented on base class, not override function
 
@@ -98,7 +96,7 @@ public:
 protected:
   PayloadType payloadType;
   std::string httpDomain = AIRGRADIENT_HTTP_DOMAIN;
-  const char *const coapDomain = "dev.bles.tech";
+  const char *const coapDomain = "map-data-int.airgradient.com";
   const int coapPort = 5683;
   const char *const mqttDomain = "api.airgradient.com";
   const int mqttPort = 1883;

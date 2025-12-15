@@ -50,13 +50,9 @@ bool AirgradientClient::mqttPublishMeasures(const std::string &payload) { return
 
 bool AirgradientClient::mqttPublishMeasures(const AirgradientPayload &payload) { return false; }
 
-bool AirgradientClient::coapConnect() { return false; }
+std::string AirgradientClient::coapFetchConfig(bool keepConnection) { return {}; }
 
-bool AirgradientClient::coapDisconnect() { return false; }
-
-std::string AirgradientClient::coapFetchConfig() { return {}; }
-
-bool AirgradientClient::coapPostMeasures(const std::string &payload) { return false; }
+bool AirgradientClient::coapPostMeasures(const std::string &payload, bool keepConnection) { return false; }
 
 void AirgradientClient::resetFetchConfigurationStatus() { lastFetchConfigSucceed = true; }
 

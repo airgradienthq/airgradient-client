@@ -28,6 +28,7 @@ private:
   CellularModule *cell_ = nullptr;
   int _networkRegistrationTimeoutMs = (3 * 60000);
   bool _extendedPmMeasures = false;
+  bool _isCoapConnected = false;
 
 public:
   AirgradientCellularClient(CellularModule *cellularModule);
@@ -49,10 +50,8 @@ public:
   bool mqttDisconnect();
   bool mqttPublishMeasures(const std::string &payload);
   bool mqttPublishMeasures(const AirgradientPayload &payload);
-  bool coapConnect();
-  bool coapDisconnect();
-  std::string coapFetchConfig();
-  bool coapPostMeasures(const std::string &payload);
+  std::string coapFetchConfig(bool keepConnection = false);
+  bool coapPostMeasures(const std::string &payload, bool keepConnection = false);
 
 private:
   std::string _getEndpoint();
@@ -71,6 +70,9 @@ private:
                     uint8_t expectedTokenLen,
                     CoapPacket::CoapPacket *respPacket,
                     int timeoutMs = 60000);
+
+  bool _coapConnect();
+  void _coapDisconnect(bool keepConnection);
 
   // CoAP request with retry logic (up to 3 attempts)
   bool _coapRequestWithRetry(const std::vector<uint8_t> &reqBuffer,
