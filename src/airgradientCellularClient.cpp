@@ -322,36 +322,6 @@ bool AirgradientCellularClient::mqttPublishMeasures(const AirgradientPayload &pa
   return mqttPublishMeasures(toSend);
 }
 
-bool AirgradientCellularClient::_coapConnect() {
-  if (_isCoapConnected) {
-    ESP_LOGI(TAG, "CoAP already connected");
-    return true;
-  }
-
-  if (cell_->udpConnect(coapDomain, coapPort) != CellReturnStatus::Ok) {
-    AG_LOGI(TAG, "Failed connect to CoAP server");
-    return false;
-  }
-
-  _isCoapConnected = true;
-  return true;
-}
-
-void AirgradientCellularClient::_coapDisconnect(bool keepConnection) {
-  if (keepConnection) {
-    _isCoapConnected = true;
-    return;
-  }
-
-  if (cell_->udpDisconnect() == CellReturnStatus::Ok) {
-    return;
-  }
-
-  AG_LOGI(TAG, "Failed disconnect to CoAP server");
-  _isCoapConnected = false;
-  // TODO: Do a force disconnection or something
-}
-
 std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
   if (!_coapConnect()) {
     lastFetchConfigSucceed = false;
@@ -377,7 +347,7 @@ std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
   AG_LOGI(TAG, "CoAP fetch configuration from %s:%d", coapDomain, coapPort);
 
   CoapPacket::CoapPacket responsePacket;
-  bool success = _coapRequest(buffer, messageId, token, 2, &responsePacket);
+  bool success = _coapRequestWithRetry(buffer, messageId, token, 2, &responsePacket);
   if (!success) {
     lastFetchConfigSucceed = false;
     return {};
@@ -427,7 +397,7 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
   AG_LOGI(TAG, "Payload: %s", payload.c_str());
 
   CoapPacket::CoapPacket responsePacket;
-  bool success = _coapRequest(buffer, messageId, token, 2, &responsePacket);
+  bool success = _coapRequestWithRetry(buffer, messageId, token, 2, &responsePacket);
 
   // TODO: Define status code from CoAP code
   // TODO: Define propse clientReady state for CoAP
@@ -440,6 +410,36 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
   return success;
 }
 
+bool AirgradientCellularClient::_coapConnect() {
+  if (_isCoapConnected) {
+    AG_LOGI(TAG, "CoAP already connected");
+    return true;
+  }
+
+  if (cell_->udpConnect(coapDomain, coapPort) != CellReturnStatus::Ok) {
+    AG_LOGI(TAG, "Failed connect to CoAP server");
+    return false;
+  }
+
+  _isCoapConnected = true;
+  return true;
+}
+
+void AirgradientCellularClient::_coapDisconnect(bool keepConnection) {
+  if (keepConnection) {
+    _isCoapConnected = true;
+    return;
+  }
+
+  if (cell_->udpDisconnect() == CellReturnStatus::Ok) {
+    return;
+  }
+
+  AG_LOGI(TAG, "Failed disconnect to CoAP server");
+  _isCoapConnected = false;
+  // TODO: Do a force disconnection or something
+}
+
 bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuffer,
                                              uint16_t expectedMessageId,
                                              const uint8_t *expectedToken, uint8_t expectedTokenLen,
@@ -447,7 +447,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   // 1. Prepare UDP packet from request buffer
   CellularModule::UdpPacket udpPacket;
   udpPacket.size = reqBuffer.size();
-  udpPacket.buff = reqBuffer; // Copy the buffer
+  udpPacket.buff = std::move(reqBuffer); // Move buffer, not copy
 
   // 2. Send request
   if (cell_->udpSend(udpPacket, coapDomain, coapPort) != CellReturnStatus::Ok) {
@@ -598,6 +598,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   uint8_t codeClass = CoapPacket::getCodeClass(respPacket->code);
   uint8_t codeDetail = CoapPacket::getCodeDetail(respPacket->code);
 
+  // TODO: Don't do this here should be decided by caller
   if (codeClass != 2) {
     AG_LOGW(TAG, "CoAP response code not success: %d.%02d", codeClass, codeDetail);
     return false;
