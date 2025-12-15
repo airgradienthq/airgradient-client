@@ -1529,30 +1529,19 @@ CellReturnStatus CellularModuleA7672XX::_httpTerminate() {
 
 CellReturnStatus CellularModuleA7672XX::_startUDP() {
   at_->sendAT("+NETOPEN");
-  // auto response = at_->waitResponse(60000);
-  // if (response == ATCommandHandler::Timeout) {
-  //   AG_LOGE(TAG, "Timeout open UDP network");
-  //   return CellReturnStatus::Timeout;
-  // } else if (response == ATCommandHandler::ExpArg2) {
-  //   AG_LOGE(TAG, "Network open failed or already open");
-  //   return CellReturnStatus::Error;
-  // }
-
-  // It will return OK first then +NETOPEN
-
   auto response = at_->waitResponse(60000, "+NETOPEN:");
   if (response == ATCommandHandler::Timeout) {
-    AG_LOGE(TAG, "Timeout start UDP service");
+    AG_LOGE(TAG, "+NETOPEN Timeout start UDP service");
     return CellReturnStatus::Timeout;
   } else if (response == ATCommandHandler::ExpArg2) {
-    AG_LOGE(TAG, "Error start UDP service");
+    AG_LOGE(TAG, "+NETOPEN Error start UDP service");
     return CellReturnStatus::Error;
   }
 
   char result[1];
   at_->waitAndRecvRespLine(result, 1);
   if (result[0] != '0') {
-    AG_LOGE(TAG, "Failed to open UDP network with code %c", result);
+    AG_LOGE(TAG, "+NETOPEN Failed to open UDP network with code %c", result);
   }
 
   return CellReturnStatus::Ok;
@@ -1562,17 +1551,17 @@ CellReturnStatus CellularModuleA7672XX::_stopUDP() {
   at_->sendAT("+NETCLOSE");
   auto response = at_->waitResponse(60000, "+NETCLOSE:");
   if (response == ATCommandHandler::Timeout) {
-    AG_LOGE(TAG, "Timeout stop UDP service");
+    AG_LOGE(TAG, "+NETCLOSE Timeout stop UDP service");
     return CellReturnStatus::Timeout;
   } else if (response == ATCommandHandler::ExpArg2) {
-    AG_LOGE(TAG, "Error stop UDP service");
+    AG_LOGE(TAG, "+NETCLOSE Error stop UDP service");
     return CellReturnStatus::Error;
   }
 
   char result[1];
   at_->waitAndRecvRespLine(result, 1);
   if (result[0] != '0') {
-    AG_LOGE(TAG, "Failed to stop UDP service with code %c", result);
+    AG_LOGE(TAG, "+NETCLOSE Failed to stop UDP service with code %c", result);
   }
 
   return CellReturnStatus::Ok;
@@ -1585,7 +1574,7 @@ CellReturnStatus CellularModuleA7672XX::_connectUDP(const std::string &host, int
   at_->sendAT(cmd);
   ATCommandHandler::Response resp = at_->waitResponse(10000);
   if (resp != ATCommandHandler::ExpArg1) {
-    Serial.println("Failed to open UDP socket");
+    Serial.println("+CIPOPEN Failed to open UDP socket");
     return CellReturnStatus::Failed;
   }
 
@@ -1599,7 +1588,7 @@ CellReturnStatus CellularModuleA7672XX::_disconnectUDP() {
   at_->sendAT(cmd);
   ATCommandHandler::Response resp = at_->waitResponse(5000);
   if (resp != ATCommandHandler::ExpArg1) {
-    AG_LOGE(TAG, "Failed to close UDP socket");
+    AG_LOGE(TAG, "+CIPCLOSE Failed to close UDP socket");
     return CellReturnStatus::Failed;
   }
 
