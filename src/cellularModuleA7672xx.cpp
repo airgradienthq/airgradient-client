@@ -1587,7 +1587,7 @@ CellReturnStatus CellularModuleA7672XX::_startUDP() {
   char result[1];
   at_->waitAndRecvRespLine(result, 1);
   if (result[0] != '0') {
-    AG_LOGE(TAG, "+NETOPEN Failed to open UDP network with code %c", result);
+    AG_LOGE(TAG, "+NETOPEN Failed to open UDP network with code %c", result[0]);
   }
 
   return CellReturnStatus::Ok;
@@ -1607,7 +1607,7 @@ CellReturnStatus CellularModuleA7672XX::_stopUDP() {
   char result[1];
   at_->waitAndRecvRespLine(result, 1);
   if (result[0] != '0') {
-    AG_LOGE(TAG, "+NETCLOSE Failed to stop UDP service with code %c", result);
+    AG_LOGE(TAG, "+NETCLOSE Failed to stop UDP service with code %c", result[0]);
   }
 
   return CellReturnStatus::Ok;
@@ -1620,7 +1620,7 @@ CellReturnStatus CellularModuleA7672XX::_connectUDP(const std::string &host, int
   at_->sendAT(cmd);
   ATCommandHandler::Response resp = at_->waitResponse(10000);
   if (resp != ATCommandHandler::ExpArg1) {
-    Serial.println("+CIPOPEN Failed to open UDP socket");
+    AG_LOGE(TAG, "+CIPOPEN failed to open UDP socket");
     return CellReturnStatus::Failed;
   }
 

@@ -5,6 +5,7 @@
  * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
  */
 
+#include <cstdint>
 #ifndef ESP8266
 
 #include "atCommandHandler.h"
@@ -45,7 +46,7 @@ void ATCommandHandler::sendRaw(const char *raw) {
 }
 
 void ATCommandHandler::sendRaw(const char *buf, int size) {
-  agSerial_->write(buf, size);
+  agSerial_->write(reinterpret_cast<const uint8_t*>(buf), size);
   agSerial_->print("\r\n");
   AT_YIELD();
 }
