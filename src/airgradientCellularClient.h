@@ -16,7 +16,7 @@
 #include "airgradientClient.h"
 #include "cellularModule.h"
 
-#include "CoapPacket.h"
+#include "coap-packet-cpp/src/CoapPacket.h"
 
 #define DEFAULT_AIRGRADIENT_APN "iot.1nce.net"
 

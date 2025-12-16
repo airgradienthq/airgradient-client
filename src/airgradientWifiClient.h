@@ -9,6 +9,7 @@
 #define AIRGRADIENT_WIFI_CLIENT_H
 
 #ifndef ESP8266
+#define ARDUINOJSON_ENABLE_PROGMEM 0
 
 #include <string>
 #include <ArduinoJson.h>

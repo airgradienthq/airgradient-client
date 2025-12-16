@@ -16,11 +16,11 @@
 #include "agLogger.h"
 #include "config.h"
 
-#include "CoapError.h"
-#include "CoapPacket.h"
-#include "CoapBuilder.h"
-#include "CoapParser.h"
-#include "CoapTypes.h"
+#include "coap-packet-cpp/src/CoapError.h"
+#include "coap-packet-cpp/src/CoapPacket.h"
+#include "coap-packet-cpp/src/CoapBuilder.h"
+#include "coap-packet-cpp/src/CoapParser.h"
+#include "coap-packet-cpp/src/CoapTypes.h"
 
 #define ONE_OPENAIR_POST_MEASURES_ENDPOINT "cts"
 #define OPENAIR_MAX_POST_MEASURES_ENDPOINT "cvn"

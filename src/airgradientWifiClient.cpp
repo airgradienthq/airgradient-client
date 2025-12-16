@@ -7,6 +7,7 @@
 
 #include "config.h"
 #ifndef ESP8266
+#define ARDUINOJSON_ENABLE_PROGMEM 0
 
 #define JSON_PROP_PM_FIRMWARE "firmware"
 #define JSON_PROP_PM01_AE "pm01"
