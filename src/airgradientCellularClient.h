@@ -52,6 +52,7 @@ public:
   bool mqttPublishMeasures(const AirgradientPayload &payload);
   std::string coapFetchConfig(bool keepConnection = false);
   bool coapPostMeasures(const std::string &payload, bool keepConnection = false);
+  bool coapPostMeasures(const AirgradientPayload &payload, bool keepConnection = false);
 
 private:
   std::string _getEndpoint();

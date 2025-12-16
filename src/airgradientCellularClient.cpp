@@ -435,6 +435,36 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
   return true;
 }
 
+bool AirgradientCellularClient::coapPostMeasures(const AirgradientPayload &payload,
+                                                 bool keepConnection) {
+  // Build payload using oss, easier to manage if there's an invalid value that should not included
+  std::ostringstream oss;
+
+  // Add interval at the first position
+  oss << payload.measureInterval;
+
+  if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
+    auto *sensor = static_cast<std::vector<MaxSensorPayload> *>(payload.sensor);
+    for (auto it = sensor->begin(); it != sensor->end(); ++it) {
+      // Seperator between measures cycle
+      oss << ",";
+      // Serialize each measurement
+      _serialize(oss, it->rco2, it->particleCount003, it->pm01, it->pm25, it->pm10, it->tvocRaw,
+                 it->noxRaw, it->atmp, it->rhum, payload.signal, it->vBat, it->vPanel,
+                 it->o3WorkingElectrode, it->o3AuxiliaryElectrode, it->no2WorkingElectrode,
+                 it->no2AuxiliaryElectrode, it->afeTemp, it->particleCount005, it->particleCount01,
+                 it->particleCount02, it->particleCount50, it->particleCount10, it->pm25Sp);
+    }
+  } else {
+    // TODO: Add for OneOpenAir payload
+  }
+
+  // Compile it
+  std::string payloadStr = oss.str();
+
+  return coapPostMeasures(payloadStr, keepConnection);
+}
+
 bool AirgradientCellularClient::_coapConnect() {
   if (_isCoapConnected) {
     AG_LOGI(TAG, "CoAP already connected");
@@ -462,7 +492,7 @@ void AirgradientCellularClient::_coapDisconnect(bool keepConnection) {
   }
 
   AG_LOGI(TAG, "Failed disconnect to CoAP server");
-    _isCoapConnected = true;
+  _isCoapConnected = true;
   // TODO: Do a force disconnection or something
 }
 
