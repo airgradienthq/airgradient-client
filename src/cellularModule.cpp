@@ -82,6 +82,8 @@ CellResult<CellularModule::UdpPacket> CellularModule::udpReceive(uint32_t timeou
   return CellResult<UdpPacket>();
 }
 
+CellResult<std::string> CellularModule::resolveDNS(const std::string &hostname) { return {}; }
+
 int CellularModule::csqToDbm(int csq) {
   if (csq == 99) {
     // Unknown or undetectable

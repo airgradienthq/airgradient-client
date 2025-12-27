@@ -932,7 +932,7 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
   // Get the <data_len>
   memset(buf, 0, 32);
   at_->waitAndRecvRespLine(buf, 32);
-  char* end;
+  char *end;
   int udpPacketSize = 0;
   udpPacketSize = strtol(buf, &end, 10);
   if (udpPacketSize == 0 || end == buf) {
@@ -943,13 +943,13 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
   AG_LOGI(TAG, "UDP packet size in buffer: %d. Retrieving buffer... ", udpPacketSize);
 
   // Allocate dynamic buffer to hold the complete UDP packet
-  char* udpPacket = new char[udpPacketSize];
+  char *udpPacket = new char[udpPacketSize];
   memset(udpPacket, 0, udpPacketSize);
 
   // Retrieve packet from buffer in chunks
   int offset = 0;
   int totalReceived = 0;
-  char* chunkBuf = new char[HTTPREAD_CHUNK_SIZE + 1];
+  char *chunkBuf = new char[HTTPREAD_CHUNK_SIZE + 1];
 
   do {
     // Determine chunk size to request (last chunk might be smaller)
@@ -991,7 +991,8 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
     memset(chunkBuf, 0, HTTPREAD_CHUNK_SIZE + 1);
     int receivedActual = at_->retrieveBuffer(chunkBuf, readLen);
     if (receivedActual != readLen) {
-      AG_LOGE(TAG, "Failed retrieve UDP chunk. Expected: %d, Received: %d", readLen, receivedActual);
+      AG_LOGE(TAG, "Failed retrieve UDP chunk. Expected: %d, Received: %d", readLen,
+              receivedActual);
       result.status = CellReturnStatus::Failed;
       delete[] udpPacket;
       delete[] chunkBuf;
@@ -1003,7 +1004,8 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
     offset += readLen;
     totalReceived += readLen;
 
-    AG_LOGV(TAG, "Received UDP chunk: %d bytes, total: %d/%d", readLen, totalReceived, udpPacketSize);
+    AG_LOGV(TAG, "Received UDP chunk: %d bytes, total: %d/%d", readLen, totalReceived,
+            udpPacketSize);
 
     // Continue until no more data remains
     if (restLen == 0 || totalReceived >= udpPacketSize) {
@@ -1016,7 +1018,8 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
 
   // Verify received all expected data
   if (totalReceived != udpPacketSize) {
-    AG_LOGE(TAG, "Incomplete UDP packet received. Expected: %d, Got: %d", udpPacketSize, totalReceived);
+    AG_LOGE(TAG, "Incomplete UDP packet received. Expected: %d, Got: %d", udpPacketSize,
+            totalReceived);
     result.status = CellReturnStatus::Failed;
     delete[] udpPacket;
     return result;
@@ -1639,6 +1642,64 @@ CellReturnStatus CellularModuleA7672XX::_disconnectUDP() {
   }
 
   return CellReturnStatus::Ok;
+}
+
+CellResult<std::string> CellularModuleA7672XX::resolveDNS(const std::string &hostname) {
+  CellResult<std::string> result;
+  result.status = CellReturnStatus::Error;
+
+  // Build AT+CDNSGIP command
+  char cmd[128];
+  snprintf(cmd, sizeof(cmd), "+CDNSGIP=\"%s\"", hostname.c_str());
+
+  at_->sendAT(cmd);
+
+  // Wait for response: +CDNSGIP: 1,"hostname","ip_address"
+  ATCommandHandler::Response response = at_->waitResponse(10000, "+CDNSGIP:");
+  if (response != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "+CDNSGIP timeout or error");
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  // Read the response line
+  std::string responseLine;
+  if (at_->waitAndRecvRespLine(responseLine) == -1) {
+    AG_LOGW(TAG, "+CDNSGIP retrieve response timeout");
+    result.status = CellReturnStatus::Timeout;
+    return result;
+  }
+
+  // Parse response: format is "1,\"hostname\",\"ip_address\""
+  // Find the last quoted string (IP address)
+  size_t lastQuoteStart = responseLine.rfind('"');
+  if (lastQuoteStart == std::string::npos || lastQuoteStart == 0) {
+    AG_LOGE(TAG, "+CDNSGIP failed to parse IP address");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  size_t secondLastQuoteStart = responseLine.rfind('"', lastQuoteStart - 1);
+  if (secondLastQuoteStart == std::string::npos) {
+    AG_LOGE(TAG, "+CDNSGIP failed to parse IP address");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  std::string ipAddress =
+      responseLine.substr(secondLastQuoteStart + 1, lastQuoteStart - secondLastQuoteStart - 1);
+
+  if (ipAddress.empty()) {
+    AG_LOGE(TAG, "+CDNSGIP returned empty IP address");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  AG_LOGI(TAG, "DNS resolved %s to %s", hostname.c_str(), ipAddress.c_str());
+
+  result.data = ipAddress;
+  result.status = CellReturnStatus::Ok;
+  return result;
 }
 
 int CellularModuleA7672XX::_mapCellTechToMode(CellTechnology ct) {

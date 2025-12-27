@@ -77,6 +77,7 @@ public:
   virtual CellReturnStatus udpDisconnect();
   virtual CellReturnStatus udpSend(const UdpPacket &packet, const std::string &host, uint16_t port);
   virtual CellResult<UdpPacket> udpReceive(uint32_t timeout);
+  virtual CellResult<std::string> resolveDNS(const std::string &hostname);
 
   // Generic functions
 

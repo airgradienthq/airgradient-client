@@ -67,8 +67,9 @@ bool AirgradientCellularClient::begin(std::string sn, PayloadType pt) {
     return false;
   }
 
-  AG_LOGI(TAG, "Cellular client ready, module registered to network");
+  AG_LOGI(TAG, "Cellular client ready, module registered to network. Warming up for 10s...");
   clientReady = true;
+  DELAY_MS(10000);
 
   return true;
 }
@@ -113,8 +114,9 @@ bool AirgradientCellularClient::ensureClientConnection(bool reset) {
     return false;
   }
 
+  AG_LOGI(TAG, "Cellular client ready, module registered to network. Warming up for 10s...");
   clientReady = true;
-  AG_LOGI(TAG, "Cellular client ready, module registered to network");
+  DELAY_MS(10000);
 
   return true;
 }
@@ -427,8 +429,6 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
   AG_LOGI(TAG, "CoAP post measures response success (%d.%02d)", codeClass, codeDetail);
   lastPostMeasuresSucceed = true;
 
-  // TODO: Define propse clientReady state for CoAP
-
   // Handling disconnection decision
   _coapDisconnect(keepConnection);
 
@@ -471,12 +471,32 @@ bool AirgradientCellularClient::_coapConnect() {
     return true;
   }
 
-  if (cell_->udpConnect(coapDomain, coapPort) != CellReturnStatus::Ok) {
-    AG_LOGI(TAG, "Failed connect to CoAP server");
-    return false;
+  // Resolve DNS if not already cached
+  if (_coapResolvedIp.empty()) {
+    AG_LOGI(TAG, "Resolving DNS for %s", coapDomain);
+    auto dnsResult = cell_->resolveDNS(coapDomain);
+    if (dnsResult.status != CellReturnStatus::Ok) {
+      AG_LOGE(TAG, "Failed to resolve DNS for CoAP server");
+      clientReady = false;
+      return false;
+    }
+    _coapResolvedIp = dnsResult.data;
+    AG_LOGI(TAG, "Resolved %s to %s", coapDomain, _coapResolvedIp.c_str());
+  } else {
+    AG_LOGI(TAG, "Using cached IP %s for %s", _coapResolvedIp.c_str(), coapDomain);
   }
 
+  // Connect using resolved IP instead of hostname
+  auto status = cell_->udpConnect(_coapResolvedIp, coapPort);
+  if (status != CellReturnStatus::Ok) {
+    AG_LOGI(TAG, "Failed connect to CoAP server");
+    clientReady = false;
+    return false;
+  }
+  // NOTE: this can be wrong since OTA use HTTP, and if said not ready, then it will reinitialized the module or not attempt at all
+
   _isCoapConnected = true;
+  clientReady = true;
   return true;
 }
 
@@ -500,13 +520,14 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
                                              uint16_t expectedMessageId,
                                              const uint8_t *expectedToken, uint8_t expectedTokenLen,
                                              CoapPacket::CoapPacket *respPacket, int timeoutMs) {
+  // NOTE: clientReady if module return error?
   // 1. Prepare UDP packet from request buffer
   CellularModule::UdpPacket udpPacket;
   udpPacket.size = reqBuffer.size();
   udpPacket.buff = std::move(reqBuffer); // Move buffer, not copy
 
-  // 2. Send request
-  if (cell_->udpSend(udpPacket, coapDomain, coapPort) != CellReturnStatus::Ok) {
+  // 2. Send request using cached IP
+  if (cell_->udpSend(udpPacket, _coapResolvedIp, coapPort) != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Failed to send CoAP request via UDP");
     return false;
   }
@@ -593,7 +614,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
         ackPacket.size = ackBuffer.size();
         ackPacket.buff = std::move(ackBuffer);
 
-        if (cell_->udpSend(ackPacket, coapDomain, coapPort) == CellReturnStatus::Ok) {
+        if (cell_->udpSend(ackPacket, _coapResolvedIp, coapPort) == CellReturnStatus::Ok) {
           AG_LOGD(TAG, "ACK sent for separate CON response");
         } else {
           AG_LOGW(TAG, "Failed to send ACK for separate CON response");
@@ -638,7 +659,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
         ackPacket.size = ackBuffer.size();
         ackPacket.buff = std::move(ackBuffer);
 
-        if (cell_->udpSend(ackPacket, coapDomain, coapPort) == CellReturnStatus::Ok) {
+        if (cell_->udpSend(ackPacket, _coapResolvedIp, coapPort) == CellReturnStatus::Ok) {
           AG_LOGI(TAG, "ACK sent for CON response");
         } else {
           AG_LOGW(TAG, "Failed to send ACK for CON response");

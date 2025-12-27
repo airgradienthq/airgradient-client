@@ -29,6 +29,7 @@ private:
   int _networkRegistrationTimeoutMs = (3 * 60000);
   bool _extendedPmMeasures = false;
   bool _isCoapConnected = false;
+  std::string _coapResolvedIp = "";  // Cached resolved IP address for CoAP server
 
 public:
   AirgradientCellularClient(CellularModule *cellularModule);
