@@ -437,8 +437,6 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
   AG_LOGI(TAG, "CoAP post measures response success (%d.%02d)", codeClass, codeDetail);
   lastPostMeasuresSucceed = true;
 
-  // TODO: Define propse clientReady state for CoAP
-
   // Handling disconnection decision
   _coapDisconnect(keepConnection);
 
@@ -482,10 +480,12 @@ bool AirgradientCellularClient::_coapConnect() {
   }
 
   if (cell_->udpConnect(coapDomain, coapPort) != CellReturnStatus::Ok) {
+    clientReady = false;
     AG_LOGI(TAG, "Failed connect to CoAP server");
     return false;
   }
 
+  clientReady = true;
   _isCoapConnected = true;
   return true;
 }

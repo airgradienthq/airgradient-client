@@ -355,6 +355,9 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
     return result;
   }
 
+  AG_LOGI(TAG, "Warming up for 6s...");
+  DELAY_MS(6000);
+
   result.status = CellReturnStatus::Ok;
   return result;
 }
