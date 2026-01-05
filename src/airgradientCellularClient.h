@@ -83,6 +83,7 @@ private:
                              CoapPacket::CoapPacket *respPacket,
                              int timeoutMs = 60000,
                              int maxRetries = 3);
+  void _generateTokenMessageId(uint8_t token[2], uint16_t *messageId);
 };
 
 #endif // ESP8266

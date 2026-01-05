@@ -22,6 +22,8 @@
 #include "coap-packet-cpp/src/CoapParser.h"
 #include "coap-packet-cpp/src/CoapTypes.h"
 
+#include "esp_random.h"
+
 #define ONE_OPENAIR_POST_MEASURES_ENDPOINT "cts"
 #define OPENAIR_MAX_POST_MEASURES_ENDPOINT "cvn"
 #ifdef ARDUINO
@@ -328,10 +330,14 @@ std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
     return {};
   }
 
-  CoapPacket::CoapBuilder builder;
+  // Create token and messageId
+  uint8_t token[2];
+  uint16_t messageId;
   std::vector<uint8_t> buffer;
-  uint8_t token[] = {0x12, 0x34};
-  uint16_t messageId = 1234;
+  _generateTokenMessageId(token, &messageId);
+
+  // Format coap packet
+  CoapPacket::CoapBuilder builder;
   auto err = builder.setType(CoapPacket::CoapType::CON)
                  .setCode(CoapPacket::CoapCode::GET)
                  .setMessageId(messageId)
@@ -386,10 +392,14 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
     return false;
   }
 
-  CoapPacket::CoapBuilder builder;
+  // Create token and messageId
+  uint8_t token[2];
+  uint16_t messageId;
   std::vector<uint8_t> buffer;
-  uint8_t token[] = {0x13, 0x35};
-  uint16_t messageId = 1234;
+  _generateTokenMessageId(token, &messageId);
+
+  // Format coap packet
+  CoapPacket::CoapBuilder builder;
   auto err = builder.setType(CoapPacket::CoapType::CON)
                  .setCode(CoapPacket::CoapCode::POST)
                  .setMessageId(messageId)
@@ -676,6 +686,13 @@ bool AirgradientCellularClient::_coapRequestWithRetry(
   AG_LOGE(TAG, "CoAP request failed after %d attempts", maxRetries);
   clientReady = false;
   return false;
+}
+
+void AirgradientCellularClient::_generateTokenMessageId(uint8_t token[2], uint16_t *messageId) {
+  uint32_t r = esp_random();
+  token[0] = (uint8_t)(r & 0xFF);
+  token[1] = (uint8_t)((r >> 8) & 0xFF);
+  *messageId = (uint16_t)((r >> 16) & 0xFFFF);
 }
 
 void AirgradientCellularClient::_serialize(
