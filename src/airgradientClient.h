@@ -13,8 +13,8 @@
 #include <vector>
 
 #define AIRGRADIENT_HTTP_DOMAIN "hw.airgradient.com"
-#define AIRGRADIENT_COAP_DOMAIN "map-data-int.airgradient.com"
-#define AIRGRADIENT_COAP_IP "5.223.43.59"
+#define AIRGRADIENT_COAP_DOMAIN "hw.airgradient.com"
+#define AIRGRADIENT_COAP_IP "91.98.9.143"
 
 class AirgradientClient {
 private:
@@ -71,7 +71,8 @@ public:
   virtual bool httpPostMeasures(const AirgradientPayload &payload);
   virtual bool mqttConnect();
   virtual bool mqttConnect(const char *uri);
-  virtual bool mqttConnect(const std::string &host, int port, std::string username = "", std::string password = "");
+  virtual bool mqttConnect(const std::string &host, int port, std::string username = "",
+                           std::string password = "");
   virtual bool mqttDisconnect();
   virtual bool mqttPublishMeasures(const std::string &payload);
   virtual bool mqttPublishMeasures(const AirgradientPayload &payload);

@@ -506,10 +506,9 @@ void AirgradientCellularClient::_coapDisconnect(bool keepConnection) {
   // TODO: Do a force disconnection or something
 }
 
-bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuffer,
-                                             uint16_t expectedMessageId,
-                                             const uint8_t *expectedToken, uint8_t expectedTokenLen,
-                                             CoapPacket::CoapPacket *respPacket, int timeoutMs) {
+CellReturnStatus AirgradientCellularClient::_coapRequest(
+    const std::vector<uint8_t> &reqBuffer, uint16_t expectedMessageId, const uint8_t *expectedToken,
+    uint8_t expectedTokenLen, CoapPacket::CoapPacket *respPacket, int timeoutMs) {
   // 1. Prepare UDP packet from request buffer
   CellularModule::UdpPacket udpPacket;
   udpPacket.size = reqBuffer.size();
@@ -518,7 +517,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   // 2. Send request
   if (cell_->udpSend(udpPacket, coapHostTarget, coapPort) != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Failed to send CoAP request via UDP");
-    return false;
+    return CellReturnStatus::Failed;
   }
 
   AG_LOGI(TAG, "CoAP request sent, waiting for response...");
@@ -526,23 +525,22 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   // 3. Receive response
   auto response = cell_->udpReceive(timeoutMs);
   if (response.status != CellReturnStatus::Ok) {
-    _lastCoapFailureReason = response.status;
     AG_LOGE(TAG, "Failed to receive CoAP response (timeout or error)");
-    return false;
+    return response.status;
   }
 
   // 4. Parse response
   CoapPacket::CoapError parseErr = CoapPacket::CoapParser::parse(response.data.buff, *respPacket);
   if (parseErr != CoapPacket::CoapError::OK) {
     AG_LOGE(TAG, "Failed to parse CoAP response: %s", CoapPacket::getErrorMessage(parseErr));
-    return false;
+    return CellReturnStatus::Failed;
   }
 
   // 5. Validate message ID
   if (respPacket->message_id != expectedMessageId) {
     AG_LOGW(TAG, "Response message ID mismatch: expected %d, got %d", expectedMessageId,
             respPacket->message_id);
-    return false;
+    return CellReturnStatus::Failed;
   }
 
   AG_LOGD(TAG, "Message ID validated");
@@ -558,9 +556,8 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     // Receive separate response
     auto separateResp = cell_->udpReceive(timeoutMs);
     if (separateResp.status != CellReturnStatus::Ok) {
-      _lastCoapFailureReason = separateResp.status;
       AG_LOGE(TAG, "Failed to receive separate CoAP response");
-      return false;
+      return separateResp.status;
     }
 
     // Parse separate response
@@ -568,20 +565,20 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     if (parseErr != CoapPacket::CoapError::OK) {
       AG_LOGE(TAG, "Failed to parse separate CoAP response: %s",
               CoapPacket::getErrorMessage(parseErr));
-      return false;
+      return CellReturnStatus::Failed;
     }
 
     // NOW validate token on the actual separate response (message ID may differ)
     if (respPacket->token_length != expectedTokenLen) {
       AG_LOGW(TAG, "Separate response token length mismatch: expected %d, got %d", expectedTokenLen,
               respPacket->token_length);
-      return false;
+      return CellReturnStatus::Failed;
     }
 
     for (uint8_t i = 0; i < expectedTokenLen; i++) {
       if (respPacket->token[i] != expectedToken[i]) {
         AG_LOGW(TAG, "Separate response token mismatch at byte %d", i);
-        return false;
+        return CellReturnStatus::Failed;
       }
     }
 
@@ -620,13 +617,13 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     if (respPacket->token_length != expectedTokenLen) {
       AG_LOGW(TAG, "Response token length mismatch: expected %d, got %d", expectedTokenLen,
               respPacket->token_length);
-      return false;
+      return CellReturnStatus::Failed;
     }
 
     for (uint8_t i = 0; i < expectedTokenLen; i++) {
       if (respPacket->token[i] != expectedToken[i]) {
         AG_LOGW(TAG, "Response token mismatch at byte %d", i);
-        return false;
+        return CellReturnStatus::Failed;
       }
     }
 
@@ -663,7 +660,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   }
 
   AG_LOGI(TAG, "CoAP request successful");
-  return true;
+  return CellReturnStatus::Ok;
 }
 
 bool AirgradientCellularClient::_coapRequestWithRetry(
@@ -674,14 +671,15 @@ bool AirgradientCellularClient::_coapRequestWithRetry(
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
     AG_LOGI(TAG, "CoAP request attempt %d/%d", attempt, maxRetries);
 
-    if (_coapRequest(reqBuffer, expectedMessageId, expectedToken, expectedTokenLen, respPacket,
-                     timeoutMs)) {
+    CellReturnStatus status = _coapRequest(reqBuffer, expectedMessageId, expectedToken,
+                                           expectedTokenLen, respPacket, timeoutMs);
+    if (status == CellReturnStatus::Ok) {
       // Success!
       return true;
     }
 
     // Track if this failure was NOT a timeout
-    if (_lastCoapFailureReason != CellReturnStatus::Timeout) {
+    if (status != CellReturnStatus::Timeout) {
       allFailuresWereTimeouts = false;
     }
 
@@ -721,8 +719,9 @@ bool AirgradientCellularClient::_coapRequestWithRetry(
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
       AG_LOGI(TAG, "CoAP request attempt %d/%d (after DNS fallback)", attempt, maxRetries);
 
-      if (_coapRequest(reqBuffer, expectedMessageId, expectedToken, expectedTokenLen, respPacket,
-                       timeoutMs)) {
+      CellReturnStatus status = _coapRequest(reqBuffer, expectedMessageId, expectedToken,
+                                             expectedTokenLen, respPacket, timeoutMs);
+      if (status == CellReturnStatus::Ok) {
         // Success with DNS-resolved IP!
         AG_LOGI(TAG, "CoAP request succeeded after DNS fallback");
         return true;
