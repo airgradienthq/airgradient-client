@@ -1,3 +1,10 @@
+/**
+ * AirGradient
+ * https://airgradient.com
+ *
+ * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
+ */
+
 #include "CoapBuilder.h"
 #include <cstring>
 #include <sstream>
