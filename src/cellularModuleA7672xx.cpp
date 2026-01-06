@@ -907,10 +907,11 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
   ATCommandHandler::Response response;
 
   // Wait for URC notification
-  response = at_->waitResponse(9000, "+CIPRXGET: 1,0");
-  if (response != ATCommandHandler::ExpArg1) {
+  if (response == ATCommandHandler::Timeout) {
     AG_LOGE(TAG, "Wait +CIPRXGET URC timeout");
-    result.status = CellReturnStatus::Failed;
+    result.status = CellReturnStatus::Timeout;
+    return result;
+  } else if (response != ATCommandHandler::ExpArg1) {
     return result;
   }
 
