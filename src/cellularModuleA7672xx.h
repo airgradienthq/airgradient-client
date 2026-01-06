@@ -103,6 +103,7 @@ public:
   CellReturnStatus udpSend(const CellularModule::UdpPacket &packet,
                                                 const std::string &host, uint16_t port);
   CellResult<CellularModule::UdpPacket> udpReceive(uint32_t timeout);
+  CellResult<std::string> resolveDNS(const std::string &hostname);
 
 private:
   const int DEFAULT_HTTP_CONNECT_TIMEOUT = 120; // seconds

@@ -56,6 +56,7 @@ public:
   virtual CellReturnStatus isSimReady();
   virtual CellResult<int> retrieveSignal();
   virtual CellResult<std::string> retrieveIPAddr();
+  virtual CellResult<std::string> resolveDNS(const std::string &hostname);
   virtual CellReturnStatus isNetworkRegistered(CellTechnology ct);
   virtual CellResult<std::string> startNetworkRegistration(CellTechnology ct,
                                                            const std::string &apn,

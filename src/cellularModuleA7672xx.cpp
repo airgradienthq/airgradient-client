@@ -1033,6 +1033,69 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
   return result;
 }
 
+CellResult<std::string> CellularModuleA7672XX::resolveDNS(const std::string &hostname) {
+  CellResult<std::string> result;
+  result.status = CellReturnStatus::Timeout;
+
+  // Send DNS query command
+  char cmd[128];
+  snprintf(cmd, sizeof(cmd), "+CDNSGIP=\"%s\"", hostname.c_str());
+  at_->sendAT(cmd);
+
+  // Wait for response prefix
+  if (at_->waitResponse("+CDNSGIP:") != ATCommandHandler::ExpArg1) {
+    return result;
+  }
+
+  // Receive the response line
+  std::string response;
+  if (at_->waitAndRecvRespLine(response) == -1) {
+    return result;
+  }
+
+  // Consume final OK/ERROR
+  at_->waitResponse();
+
+  // Parse response format: "1,<domain>,<IP>" or "2,<domain>,<IP>"
+  // Error format: "0,<error_code>"
+  size_t firstComma = response.find(',');
+  if (firstComma == std::string::npos) {
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  std::string statusCode = response.substr(0, firstComma);
+  if (statusCode != "1" && statusCode != "2") {
+    // DNS resolution failed (status 0)
+    AG_LOGE(TAG, "DNS resolution failed: %s", response.c_str());
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  // Find second comma to extract IP address
+  size_t secondComma = response.find(',', firstComma + 1);
+  if (secondComma == std::string::npos) {
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  // Extract IP address (everything after second comma, trim spaces and quotes)
+  std::string ipAddr = response.substr(secondComma + 1);
+  // Trim whitespace
+  ipAddr.erase(0, ipAddr.find_first_not_of(" \t\r\n"));
+  ipAddr.erase(ipAddr.find_last_not_of(" \t\r\n") + 1);
+  // Trim quotes
+  ipAddr.erase(0, ipAddr.find_first_not_of("\""));
+  ipAddr.erase(ipAddr.find_last_not_of("\"") + 1);
+
+  AG_LOGI(TAG, "DNS resolved %s to %s", hostname.c_str(), ipAddr.c_str());
+
+  result.status = CellReturnStatus::Ok;
+  result.data = ipAddr;
+
+  return result;
+}
+
 CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implCheckModuleReady() {
   if (at_->testAT() == false) {
     REGIS_RETRY_DELAY();
