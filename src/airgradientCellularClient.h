@@ -29,6 +29,7 @@ private:
   int _networkRegistrationTimeoutMs = (3 * 60000);
   bool _extendedPmMeasures = false;
   bool _isCoapConnected = false;
+  CellReturnStatus _lastCoapFailureReason = CellReturnStatus::Ok;
 
 public:
   AirgradientCellularClient(CellularModule *cellularModule);

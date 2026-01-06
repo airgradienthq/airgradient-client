@@ -13,6 +13,8 @@
 #include <vector>
 
 #define AIRGRADIENT_HTTP_DOMAIN "hw.airgradient.com"
+#define AIRGRADIENT_COAP_DOMAIN "map-data-int.airgradient.com"
+#define AIRGRADIENT_COAP_IP "5.223.43.59"
 
 class AirgradientClient {
 private:
@@ -97,7 +99,7 @@ public:
 protected:
   PayloadType payloadType;
   std::string httpDomain = AIRGRADIENT_HTTP_DOMAIN;
-  const char *const coapDomain = "map-data-int.airgradient.com";
+  std::string coapHostTarget = AIRGRADIENT_COAP_IP;
   const int coapPort = 5683;
   const char *const mqttDomain = "api.airgradient.com";
   const int mqttPort = 1883;

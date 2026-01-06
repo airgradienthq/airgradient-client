@@ -350,7 +350,7 @@ std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
   }
 
   // TODO: Add URI to the path
-  AG_LOGI(TAG, "CoAP fetch configuration from %s:%d", coapDomain, coapPort);
+  AG_LOGI(TAG, "CoAP fetch configuration from %s:%d", coapHostTarget.c_str(), coapPort);
 
   CoapPacket::CoapPacket responsePacket;
   bool success = _coapRequestWithRetry(buffer, messageId, token, 2, &responsePacket);
@@ -414,7 +414,7 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
     return false;
   }
 
-  AG_LOGI(TAG, "CoAP post measures to %s:%d", coapDomain, coapPort); // TODO: Add path
+  AG_LOGI(TAG, "CoAP post measures to %s:%d", coapHostTarget.c_str(), coapPort); // TODO: Add path
   AG_LOGI(TAG, "Payload: %s", payload.c_str());
 
   CoapPacket::CoapPacket responsePacket;
@@ -479,7 +479,7 @@ bool AirgradientCellularClient::_coapConnect() {
     return true;
   }
 
-  if (cell_->udpConnect(coapDomain, coapPort) != CellReturnStatus::Ok) {
+  if (cell_->udpConnect(coapHostTarget, coapPort) != CellReturnStatus::Ok) {
     clientReady = false;
     AG_LOGI(TAG, "Failed connect to CoAP server");
     return false;
@@ -516,7 +516,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   udpPacket.buff = std::move(reqBuffer); // Move buffer, not copy
 
   // 2. Send request
-  if (cell_->udpSend(udpPacket, coapDomain, coapPort) != CellReturnStatus::Ok) {
+  if (cell_->udpSend(udpPacket, coapHostTarget, coapPort) != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Failed to send CoAP request via UDP");
     return false;
   }
@@ -526,6 +526,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   // 3. Receive response
   auto response = cell_->udpReceive(timeoutMs);
   if (response.status != CellReturnStatus::Ok) {
+    _lastCoapFailureReason = response.status;
     AG_LOGE(TAG, "Failed to receive CoAP response (timeout or error)");
     return false;
   }
@@ -557,6 +558,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     // Receive separate response
     auto separateResp = cell_->udpReceive(timeoutMs);
     if (separateResp.status != CellReturnStatus::Ok) {
+      _lastCoapFailureReason = separateResp.status;
       AG_LOGE(TAG, "Failed to receive separate CoAP response");
       return false;
     }
@@ -603,7 +605,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
         ackPacket.size = ackBuffer.size();
         ackPacket.buff = std::move(ackBuffer);
 
-        if (cell_->udpSend(ackPacket, coapDomain, coapPort) == CellReturnStatus::Ok) {
+        if (cell_->udpSend(ackPacket, coapHostTarget, coapPort) == CellReturnStatus::Ok) {
           AG_LOGD(TAG, "ACK sent for separate CON response");
         } else {
           AG_LOGW(TAG, "Failed to send ACK for separate CON response");
@@ -648,7 +650,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
         ackPacket.size = ackBuffer.size();
         ackPacket.buff = std::move(ackBuffer);
 
-        if (cell_->udpSend(ackPacket, coapDomain, coapPort) == CellReturnStatus::Ok) {
+        if (cell_->udpSend(ackPacket, coapHostTarget, coapPort) == CellReturnStatus::Ok) {
           AG_LOGI(TAG, "ACK sent for CON response");
         } else {
           AG_LOGW(TAG, "Failed to send ACK for CON response");
@@ -667,6 +669,8 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
 bool AirgradientCellularClient::_coapRequestWithRetry(
     const std::vector<uint8_t> &reqBuffer, uint16_t expectedMessageId, const uint8_t *expectedToken,
     uint8_t expectedTokenLen, CoapPacket::CoapPacket *respPacket, int timeoutMs, int maxRetries) {
+  bool allFailuresWereTimeouts = true;
+
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
     AG_LOGI(TAG, "CoAP request attempt %d/%d", attempt, maxRetries);
 
@@ -676,14 +680,64 @@ bool AirgradientCellularClient::_coapRequestWithRetry(
       return true;
     }
 
+    // Track if this failure was NOT a timeout
+    if (_lastCoapFailureReason != CellReturnStatus::Timeout) {
+      allFailuresWereTimeouts = false;
+    }
+
     // Failed, log and retry if attempts remain
     if (attempt < maxRetries) {
       AG_LOGW(TAG, "CoAP request failed, retrying...");
     }
   }
 
-  // All attempts failed
-  AG_LOGE(TAG, "CoAP request failed after %d attempts", maxRetries);
+  // All attempts failed - check if we should try DNS fallback
+  if (allFailuresWereTimeouts && coapHostTarget == AIRGRADIENT_COAP_IP) {
+    AG_LOGI(TAG, "All retries timed out with default IP, attempting DNS fallback");
+
+    // Disconnect from current connection
+    _coapDisconnect(false);
+
+    // Resolve DNS
+    auto dnsResult = cell_->resolveDNS(AIRGRADIENT_COAP_DOMAIN);
+    if (dnsResult.status != CellReturnStatus::Ok) {
+      AG_LOGE(TAG, "DNS resolution failed for %s", AIRGRADIENT_COAP_DOMAIN);
+      clientReady = false;
+      return false;
+    }
+
+    // Update target with resolved IP
+    coapHostTarget = dnsResult.data;
+    AG_LOGI(TAG, "DNS resolved to %s, reconnecting and retrying", coapHostTarget.c_str());
+
+    // Reconnect
+    if (!_coapConnect()) {
+      AG_LOGE(TAG, "Failed to reconnect after DNS resolution");
+      clientReady = false;
+      return false;
+    }
+
+    // Retry request with same retry count
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      AG_LOGI(TAG, "CoAP request attempt %d/%d (after DNS fallback)", attempt, maxRetries);
+
+      if (_coapRequest(reqBuffer, expectedMessageId, expectedToken, expectedTokenLen, respPacket,
+                       timeoutMs)) {
+        // Success with DNS-resolved IP!
+        AG_LOGI(TAG, "CoAP request succeeded after DNS fallback");
+        return true;
+      }
+
+      if (attempt < maxRetries) {
+        AG_LOGW(TAG, "CoAP request failed, retrying...");
+      }
+    }
+
+    AG_LOGE(TAG, "CoAP request failed after %d attempts with DNS-resolved IP", maxRetries);
+  } else {
+    AG_LOGE(TAG, "CoAP request failed after %d attempts", maxRetries);
+  }
+
   clientReady = false;
   return false;
 }
