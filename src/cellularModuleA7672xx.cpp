@@ -23,11 +23,16 @@
 
 #define REGIS_RETRY_DELAY() DELAY_MS(1000);
 
-CellularModuleA7672XX::CellularModuleA7672XX(AirgradientSerial *agSerial) : agSerial_(agSerial) {}
+CellularModuleA7672XX::CellularModuleA7672XX(AirgradientSerial *agSerial, uint32_t warmUpTimeMs) {
+  agSerial_ = agSerial;
+  _warmUpTimeMs = warmUpTimeMs;
+}
 
-CellularModuleA7672XX::CellularModuleA7672XX(AirgradientSerial *agSerial, int powerPin) {
+CellularModuleA7672XX::CellularModuleA7672XX(AirgradientSerial *agSerial, int powerPin,
+                                             uint32_t warmUpTimeMs) {
   agSerial_ = agSerial;
   _powerIO = static_cast<gpio_num_t>(powerPin);
+  _warmUpTimeMs = warmUpTimeMs;
 }
 
 CellularModuleA7672XX::~CellularModuleA7672XX() {
@@ -354,6 +359,9 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
     AG_LOGW(TAG, "Register to network operation failed!");
     return result;
   }
+
+  AG_LOGI(TAG, "Warming up for %" PRIu32 "s...", _warmUpTimeMs);
+  DELAY_MS(_warmUpTimeMs);
 
   result.status = CellReturnStatus::Ok;
   return result;

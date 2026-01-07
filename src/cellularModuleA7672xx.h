@@ -38,6 +38,7 @@ private:
   const char *const TAG = "A7672XX";
 
   bool _initialized = false;
+  uint32_t _warmUpTimeMs;
 
   AirgradientSerial *agSerial_ = nullptr;
   gpio_num_t _powerIO = GPIO_NUM_NC;
@@ -67,8 +68,8 @@ public:
     NETWORK_REGISTERED
   };
 
-  CellularModuleA7672XX(AirgradientSerial *agSerial);
-  CellularModuleA7672XX(AirgradientSerial *agSerial, int powerPin);
+  CellularModuleA7672XX(AirgradientSerial *agSerial, uint32_t warmUpTimeMs = 0);
+  CellularModuleA7672XX(AirgradientSerial *agSerial, int powerPin, uint32_t warmUpTimeMs = 0);
   ~CellularModuleA7672XX();
 
   bool init();
