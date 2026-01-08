@@ -360,7 +360,7 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
     return result;
   }
 
-  AG_LOGI(TAG, "Warming up for %" PRIu32 "s...", _warmUpTimeMs);
+  AG_LOGI(TAG, "Warming up for %" PRIu32 "ms...", _warmUpTimeMs);
   DELAY_MS(_warmUpTimeMs);
 
   result.status = CellReturnStatus::Ok;
@@ -1210,13 +1210,24 @@ CellReturnStatus CellularModuleA7672XX::_activatePDPContext() {
 
 CellReturnStatus CellularModuleA7672XX::_httpInit() {
   at_->sendAT("+HTTPINIT");
-  auto response = at_->waitResponse();
+  auto response = at_->waitResponse(20000);
   if (response == ATCommandHandler::Timeout) {
     AG_LOGW(TAG, "Timeout wait response +HTTPINIT");
     return CellReturnStatus::Timeout;
   } else if (response == ATCommandHandler::ExpArg2) {
-    AG_LOGW(TAG, "Error initialize module HTTP service");
-    return CellReturnStatus::Error;
+    AG_LOGW(TAG, "Error initialize module HTTP service, retry once more in 2s");
+    DELAY_MS(2000);
+
+    // Re-send HTTPINIT again
+    at_->sendAT("+HTTPINIT");
+    response = at_->waitResponse();
+    if (response == ATCommandHandler::Timeout) {
+      AG_LOGW(TAG, "Timeout wait response +HTTPINIT");
+      return CellReturnStatus::Timeout;
+    } else if (response == ATCommandHandler::ExpArg2) {
+      AG_LOGW(TAG, "Still return error to initialize module HTTP service");
+      return CellReturnStatus::Error;
+    }
   }
 
   return CellReturnStatus::Ok;
