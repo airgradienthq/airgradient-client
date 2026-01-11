@@ -355,6 +355,9 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
     return result;
   }
 
+  AG_LOGI(TAG, "Warming up for 6s...");
+  DELAY_MS(6000);
+
   result.status = CellReturnStatus::Ok;
   return result;
 }
@@ -904,10 +907,14 @@ CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t
   ATCommandHandler::Response response;
 
   // Wait for URC notification
-  response = at_->waitResponse(9000, "+CIPRXGET: 1,0");
-  if (response != ATCommandHandler::ExpArg1) {
+  response = at_->waitResponse(3000, "+CIPRXGET: 1,0");
+  if (response == ATCommandHandler::Timeout) {
     AG_LOGE(TAG, "Wait +CIPRXGET URC timeout");
-    result.status = CellReturnStatus::Failed;
+    result.status = CellReturnStatus::Timeout;
+    return result;
+  } else if (response != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "Wait +CIPRXGET URC Error");
+    result.status = CellReturnStatus::Error;
     return result;
   }
 
@@ -1578,13 +1585,17 @@ CellReturnStatus CellularModuleA7672XX::_httpTerminate() {
 
 CellReturnStatus CellularModuleA7672XX::_startUDP() {
   at_->sendAT("+NETOPEN");
-  auto response = at_->waitResponse(60000, "+NETOPEN:");
-  if (response == ATCommandHandler::Timeout) {
-    AG_LOGE(TAG, "+NETOPEN Timeout start UDP service");
-    return CellReturnStatus::Timeout;
-  } else if (response == ATCommandHandler::ExpArg2) {
+  auto response = at_->waitResponse(60000, "+NETOPEN:", "+IP ERROR:", "ERROR");
+  if (response == ATCommandHandler::ExpArg2) {
+    at_->clearBuffer();
+    AG_LOGI(TAG, "+NETOPEN PDP context has been activated successfully");
+    return CellReturnStatus::Ok;
+  } else if (response == ATCommandHandler::ExpArg3) {
     AG_LOGE(TAG, "+NETOPEN Error start UDP service");
     return CellReturnStatus::Error;
+  } else if (response == ATCommandHandler::Timeout) {
+    AG_LOGE(TAG, "+NETOPEN Timeout start UDP service");
+    return CellReturnStatus::Timeout;
   }
 
   char result[1];

@@ -138,4 +138,4 @@ MIT License
 
 ## Contributing
 
-This library is designed to be minimal and focused. If you need additional features, consider using libcoap or lobaro-coap 
+This library is designed to be minimal and focused. If you need additional features, consider using libcoap or lobaro-coap

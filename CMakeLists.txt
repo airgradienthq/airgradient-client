@@ -9,6 +9,9 @@ set(srcs
   # CoAP
   "src/coap-packet-cpp/src/CoapBuilder.cpp"
   "src/coap-packet-cpp/src/CoapParser.cpp"
+
+  # Payload Encoder
+  "src/payload-encoder/src/PayloadEncoder.cpp"
 )
 
 idf_component_register(SRCS "${srcs}"

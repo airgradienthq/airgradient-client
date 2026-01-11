@@ -31,6 +31,10 @@ CellResult<int> CellularModule::retrieveSignal() { return CellResult<int>(); }
 
 CellResult<std::string> CellularModule::retrieveIPAddr() { return CellResult<std::string>(); }
 
+CellResult<std::string> CellularModule::resolveDNS(const std::string &hostname) {
+  return CellResult<std::string>();
+}
+
 CellReturnStatus CellularModule::isNetworkRegistered(CellTechnology ct) {
   return CellReturnStatus();
 }
@@ -81,8 +85,6 @@ CellReturnStatus CellularModule::udpSend(const UdpPacket &packet, const std::str
 CellResult<CellularModule::UdpPacket> CellularModule::udpReceive(uint32_t timeout) {
   return CellResult<UdpPacket>();
 }
-
-CellResult<std::string> CellularModule::resolveDNS(const std::string &hostname) { return {}; }
 
 int CellularModule::csqToDbm(int csq) {
   if (csq == 99) {

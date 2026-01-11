@@ -100,10 +100,9 @@ public:
 
   CellReturnStatus udpConnect(const std::string &host, int port = 5683);
   CellReturnStatus udpDisconnect();
-  CellReturnStatus udpSend(const CellularModule::UdpPacket &packet,
-                                                const std::string &host, uint16_t port);
+  CellReturnStatus udpSend(const CellularModule::UdpPacket &packet, const std::string &host,
+                           uint16_t port);
   CellResult<CellularModule::UdpPacket> udpReceive(uint32_t timeout);
-
   CellResult<std::string> resolveDNS(const std::string &hostname);
 
 private:

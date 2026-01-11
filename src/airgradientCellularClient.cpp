@@ -22,6 +22,8 @@
 #include "coap-packet-cpp/src/CoapParser.h"
 #include "coap-packet-cpp/src/CoapTypes.h"
 
+#include "esp_random.h"
+
 #define ONE_OPENAIR_POST_MEASURES_ENDPOINT "cts"
 #define OPENAIR_MAX_POST_MEASURES_ENDPOINT "cvn"
 #ifdef ARDUINO
@@ -330,10 +332,14 @@ std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
     return {};
   }
 
-  CoapPacket::CoapBuilder builder;
+  // Create token and messageId
+  uint8_t token[2];
+  uint16_t messageId;
   std::vector<uint8_t> buffer;
-  uint8_t token[] = {0x12, 0x34};
-  uint16_t messageId = 1234;
+  _generateTokenMessageId(token, &messageId);
+
+  // Format coap packet
+  CoapPacket::CoapBuilder builder;
   auto err = builder.setType(CoapPacket::CoapType::CON)
                  .setCode(CoapPacket::CoapCode::GET)
                  .setMessageId(messageId)
@@ -346,7 +352,7 @@ std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
   }
 
   // TODO: Add URI to the path
-  AG_LOGI(TAG, "CoAP fetch configuration from %s:%d", coapDomain, coapPort);
+  AG_LOGI(TAG, "CoAP fetch configuration from %s:%d", coapHostTarget.c_str(), coapPort);
 
   CoapPacket::CoapPacket responsePacket;
   bool success = _coapRequestWithRetry(buffer, messageId, token, 2, &responsePacket);
@@ -388,10 +394,14 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
     return false;
   }
 
-  CoapPacket::CoapBuilder builder;
+  // Create token and messageId
+  uint8_t token[2];
+  uint16_t messageId;
   std::vector<uint8_t> buffer;
-  uint8_t token[] = {0x13, 0x35};
-  uint16_t messageId = 1234;
+  _generateTokenMessageId(token, &messageId);
+
+  // Format coap packet
+  CoapPacket::CoapBuilder builder;
   auto err = builder.setType(CoapPacket::CoapType::CON)
                  .setCode(CoapPacket::CoapCode::POST)
                  .setMessageId(messageId)
@@ -406,7 +416,7 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
     return false;
   }
 
-  AG_LOGI(TAG, "CoAP post measures to %s:%d", coapDomain, coapPort); // TODO: Add path
+  AG_LOGI(TAG, "CoAP post measures to %s:%d", coapHostTarget.c_str(), coapPort); // TODO: Add path
   AG_LOGI(TAG, "Payload: %s", payload.c_str());
 
   CoapPacket::CoapPacket responsePacket;
@@ -471,30 +481,13 @@ bool AirgradientCellularClient::_coapConnect() {
     return true;
   }
 
-  // Resolve DNS if not already cached
-  if (_coapResolvedIp.empty()) {
-    AG_LOGI(TAG, "Resolving DNS for %s", coapDomain);
-    auto dnsResult = cell_->resolveDNS(coapDomain);
-    if (dnsResult.status != CellReturnStatus::Ok) {
-      AG_LOGE(TAG, "Failed to resolve DNS for CoAP server");
-      clientReady = false;
-      return false;
-    }
-    _coapResolvedIp = dnsResult.data;
-    AG_LOGI(TAG, "Resolved %s to %s", coapDomain, _coapResolvedIp.c_str());
-  } else {
-    AG_LOGI(TAG, "Using cached IP %s for %s", _coapResolvedIp.c_str(), coapDomain);
-  }
-
-  // Connect using resolved IP instead of hostname
-  auto status = cell_->udpConnect(_coapResolvedIp, coapPort);
-  if (status != CellReturnStatus::Ok) {
-    AG_LOGI(TAG, "Failed connect to CoAP server");
+  if (cell_->udpConnect(coapHostTarget, coapPort) != CellReturnStatus::Ok) {
     clientReady = false;
+    AG_LOGI(TAG, "Failed connect to CoAP server");
     return false;
   }
-  // NOTE: this can be wrong since OTA use HTTP, and if said not ready, then it will reinitialized the module or not attempt at all
 
+  clientReady = true;
   _isCoapConnected = true;
   clientReady = true;
   return true;
@@ -516,20 +509,18 @@ void AirgradientCellularClient::_coapDisconnect(bool keepConnection) {
   // TODO: Do a force disconnection or something
 }
 
-bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuffer,
-                                             uint16_t expectedMessageId,
-                                             const uint8_t *expectedToken, uint8_t expectedTokenLen,
-                                             CoapPacket::CoapPacket *respPacket, int timeoutMs) {
-  // NOTE: clientReady if module return error?
+CellReturnStatus AirgradientCellularClient::_coapRequest(
+    const std::vector<uint8_t> &reqBuffer, uint16_t expectedMessageId, const uint8_t *expectedToken,
+    uint8_t expectedTokenLen, CoapPacket::CoapPacket *respPacket, int timeoutMs) {
   // 1. Prepare UDP packet from request buffer
   CellularModule::UdpPacket udpPacket;
   udpPacket.size = reqBuffer.size();
   udpPacket.buff = std::move(reqBuffer); // Move buffer, not copy
 
-  // 2. Send request using cached IP
-  if (cell_->udpSend(udpPacket, _coapResolvedIp, coapPort) != CellReturnStatus::Ok) {
+  // 2. Send request
+  if (cell_->udpSend(udpPacket, coapHostTarget, coapPort) != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Failed to send CoAP request via UDP");
-    return false;
+    return CellReturnStatus::Failed;
   }
 
   AG_LOGI(TAG, "CoAP request sent, waiting for response...");
@@ -538,21 +529,21 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   auto response = cell_->udpReceive(timeoutMs);
   if (response.status != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Failed to receive CoAP response (timeout or error)");
-    return false;
+    return response.status;
   }
 
   // 4. Parse response
   CoapPacket::CoapError parseErr = CoapPacket::CoapParser::parse(response.data.buff, *respPacket);
   if (parseErr != CoapPacket::CoapError::OK) {
     AG_LOGE(TAG, "Failed to parse CoAP response: %s", CoapPacket::getErrorMessage(parseErr));
-    return false;
+    return CellReturnStatus::Failed;
   }
 
   // 5. Validate message ID
   if (respPacket->message_id != expectedMessageId) {
     AG_LOGW(TAG, "Response message ID mismatch: expected %d, got %d", expectedMessageId,
             respPacket->message_id);
-    return false;
+    return CellReturnStatus::Failed;
   }
 
   AG_LOGD(TAG, "Message ID validated");
@@ -569,7 +560,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     auto separateResp = cell_->udpReceive(timeoutMs);
     if (separateResp.status != CellReturnStatus::Ok) {
       AG_LOGE(TAG, "Failed to receive separate CoAP response");
-      return false;
+      return separateResp.status;
     }
 
     // Parse separate response
@@ -577,20 +568,20 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     if (parseErr != CoapPacket::CoapError::OK) {
       AG_LOGE(TAG, "Failed to parse separate CoAP response: %s",
               CoapPacket::getErrorMessage(parseErr));
-      return false;
+      return CellReturnStatus::Failed;
     }
 
     // NOW validate token on the actual separate response (message ID may differ)
     if (respPacket->token_length != expectedTokenLen) {
       AG_LOGW(TAG, "Separate response token length mismatch: expected %d, got %d", expectedTokenLen,
               respPacket->token_length);
-      return false;
+      return CellReturnStatus::Failed;
     }
 
     for (uint8_t i = 0; i < expectedTokenLen; i++) {
       if (respPacket->token[i] != expectedToken[i]) {
         AG_LOGW(TAG, "Separate response token mismatch at byte %d", i);
-        return false;
+        return CellReturnStatus::Failed;
       }
     }
 
@@ -614,7 +605,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
         ackPacket.size = ackBuffer.size();
         ackPacket.buff = std::move(ackBuffer);
 
-        if (cell_->udpSend(ackPacket, _coapResolvedIp, coapPort) == CellReturnStatus::Ok) {
+        if (cell_->udpSend(ackPacket, coapHostTarget, coapPort) == CellReturnStatus::Ok) {
           AG_LOGD(TAG, "ACK sent for separate CON response");
         } else {
           AG_LOGW(TAG, "Failed to send ACK for separate CON response");
@@ -629,13 +620,13 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
     if (respPacket->token_length != expectedTokenLen) {
       AG_LOGW(TAG, "Response token length mismatch: expected %d, got %d", expectedTokenLen,
               respPacket->token_length);
-      return false;
+      return CellReturnStatus::Failed;
     }
 
     for (uint8_t i = 0; i < expectedTokenLen; i++) {
       if (respPacket->token[i] != expectedToken[i]) {
         AG_LOGW(TAG, "Response token mismatch at byte %d", i);
-        return false;
+        return CellReturnStatus::Failed;
       }
     }
 
@@ -659,7 +650,7 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
         ackPacket.size = ackBuffer.size();
         ackPacket.buff = std::move(ackBuffer);
 
-        if (cell_->udpSend(ackPacket, _coapResolvedIp, coapPort) == CellReturnStatus::Ok) {
+        if (cell_->udpSend(ackPacket, coapHostTarget, coapPort) == CellReturnStatus::Ok) {
           AG_LOGI(TAG, "ACK sent for CON response");
         } else {
           AG_LOGW(TAG, "Failed to send ACK for CON response");
@@ -672,19 +663,27 @@ bool AirgradientCellularClient::_coapRequest(const std::vector<uint8_t> &reqBuff
   }
 
   AG_LOGI(TAG, "CoAP request successful");
-  return true;
+  return CellReturnStatus::Ok;
 }
 
 bool AirgradientCellularClient::_coapRequestWithRetry(
     const std::vector<uint8_t> &reqBuffer, uint16_t expectedMessageId, const uint8_t *expectedToken,
     uint8_t expectedTokenLen, CoapPacket::CoapPacket *respPacket, int timeoutMs, int maxRetries) {
+  bool allFailuresWereTimeouts = true;
+
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
     AG_LOGI(TAG, "CoAP request attempt %d/%d", attempt, maxRetries);
 
-    if (_coapRequest(reqBuffer, expectedMessageId, expectedToken, expectedTokenLen, respPacket,
-                     timeoutMs)) {
+    CellReturnStatus status = _coapRequest(reqBuffer, expectedMessageId, expectedToken,
+                                           expectedTokenLen, respPacket, timeoutMs);
+    if (status == CellReturnStatus::Ok) {
       // Success!
       return true;
+    }
+
+    // Track if this failure was NOT a timeout
+    if (status != CellReturnStatus::Timeout) {
+      allFailuresWereTimeouts = false;
     }
 
     // Failed, log and retry if attempts remain
@@ -693,10 +692,63 @@ bool AirgradientCellularClient::_coapRequestWithRetry(
     }
   }
 
-  // All attempts failed
-  AG_LOGE(TAG, "CoAP request failed after %d attempts", maxRetries);
+  // All attempts failed - check if we should try DNS fallback
+  if (allFailuresWereTimeouts && coapHostTarget == AIRGRADIENT_COAP_IP) {
+    AG_LOGI(TAG, "All retries timed out with default IP, attempting DNS fallback");
+
+    // Disconnect from current connection
+    _coapDisconnect(false);
+
+    // Resolve DNS
+    auto dnsResult = cell_->resolveDNS(AIRGRADIENT_COAP_DOMAIN);
+    if (dnsResult.status != CellReturnStatus::Ok) {
+      AG_LOGE(TAG, "DNS resolution failed for %s", AIRGRADIENT_COAP_DOMAIN);
+      clientReady = false;
+      return false;
+    }
+
+    // Update target with resolved IP
+    coapHostTarget = dnsResult.data;
+    AG_LOGI(TAG, "DNS resolved to %s, reconnecting and retrying", coapHostTarget.c_str());
+
+    // Reconnect
+    if (!_coapConnect()) {
+      AG_LOGE(TAG, "Failed to reconnect after DNS resolution");
+      clientReady = false;
+      return false;
+    }
+
+    // Retry request with same retry count
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      AG_LOGI(TAG, "CoAP request attempt %d/%d (after DNS fallback)", attempt, maxRetries);
+
+      CellReturnStatus status = _coapRequest(reqBuffer, expectedMessageId, expectedToken,
+                                             expectedTokenLen, respPacket, timeoutMs);
+      if (status == CellReturnStatus::Ok) {
+        // Success with DNS-resolved IP!
+        AG_LOGI(TAG, "CoAP request succeeded after DNS fallback");
+        return true;
+      }
+
+      if (attempt < maxRetries) {
+        AG_LOGW(TAG, "CoAP request failed, retrying...");
+      }
+    }
+
+    AG_LOGE(TAG, "CoAP request failed after %d attempts with DNS-resolved IP", maxRetries);
+  } else {
+    AG_LOGE(TAG, "CoAP request failed after %d attempts", maxRetries);
+  }
+
   clientReady = false;
   return false;
+}
+
+void AirgradientCellularClient::_generateTokenMessageId(uint8_t token[2], uint16_t *messageId) {
+  uint32_t r = esp_random();
+  token[0] = (uint8_t)(r & 0xFF);
+  token[1] = (uint8_t)((r >> 8) & 0xFF);
+  *messageId = (uint16_t)((r >> 16) & 0xFFFF);
 }
 
 void AirgradientCellularClient::_serialize(
