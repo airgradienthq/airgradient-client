@@ -1809,4 +1809,105 @@ int CellularModuleA7672XX::_calculateResponseTimeout(int connectionTimeout, int 
   return waitActionTimeout;
 }
 
+bool CellularModuleA7672XX::setOperators(const std::string &serialized, uint32_t operatorId) {
+  AG_LOGI(TAG, "Setting operators from serialized string: %s, current operatorId: %" PRIu32,
+          serialized.c_str(), operatorId);
+
+  // Clear existing operators
+  availableOperators_.clear();
+  currentOperatorId_ = operatorId;
+  currentOperatorIndex_ = 0;
+
+  // Handle empty string
+  if (serialized.empty()) {
+    AG_LOGI(TAG, "Empty operator string, cleared operator list");
+    return true;
+  }
+
+  // Parse the serialized string format: "46001:7,46002:2,50501:7"
+  size_t start = 0;
+  size_t foundIndex = 0;
+  bool currentOperatorFound = false;
+
+  while (start < serialized.length()) {
+    // Find next comma or end of string
+    size_t commaPos = serialized.find(',', start);
+    if (commaPos == std::string::npos) {
+      commaPos = serialized.length();
+    }
+
+    // Extract entry
+    std::string entry = serialized.substr(start, commaPos - start);
+
+    // Find colon separator
+    size_t colonPos = entry.find(':');
+    if (colonPos == std::string::npos) {
+      AG_LOGW(TAG, "Malformed entry (no colon): %s", entry.c_str());
+      start = commaPos + 1;
+      continue;
+    }
+
+    // Parse operator ID and access tech
+    std::string idStr = entry.substr(0, colonPos);
+    std::string techStr = entry.substr(colonPos + 1);
+
+    uint32_t id = atoi(idStr.c_str());
+    int tech = atoi(techStr.c_str());
+
+    // Validate
+    if (id == 0 && idStr != "0") {
+      AG_LOGW(TAG, "Invalid operator ID in entry: %s", entry.c_str());
+      start = commaPos + 1;
+      continue;
+    }
+
+    // Add to vector
+    OperatorInfo info;
+    info.operatorId = id;
+    info.accessTech = tech;
+    availableOperators_.push_back(info);
+
+    // Check if this is the current operator
+    if (id == operatorId && !currentOperatorFound) {
+      currentOperatorIndex_ = foundIndex;
+      currentOperatorFound = true;
+      AG_LOGI(TAG, "Found current operator at index %zu", currentOperatorIndex_);
+    }
+
+    foundIndex++;
+    start = commaPos + 1;
+  }
+
+  AG_LOGI(TAG, "Loaded %zu operators from serialized string", availableOperators_.size());
+
+  if (!currentOperatorFound && operatorId != 0) {
+    AG_LOGW(TAG, "Current operator ID %" PRIu32 " not found in operator list", operatorId);
+  }
+
+  return true;
+}
+
+std::string CellularModuleA7672XX::getSerializedOperators() const {
+  if (availableOperators_.empty()) {
+    return "";
+  }
+
+  std::string result;
+  for (size_t i = 0; i < availableOperators_.size(); i++) {
+    if (i > 0) {
+      result += ",";
+    }
+
+    char buf[32];
+    sprintf(buf, "%" PRIu32 ":%d", availableOperators_[i].operatorId, availableOperators_[i].accessTech);
+    result += buf;
+  }
+
+  return result;
+}
+
+uint32_t CellularModuleA7672XX::getCurrentOperatorId() const {
+  return currentOperatorId_;
+}
+
 #endif // ESP8266

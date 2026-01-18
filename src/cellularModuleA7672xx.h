@@ -54,6 +54,7 @@ private:
   // Operator selection for manual network registration
   std::vector<OperatorInfo> availableOperators_;  // Persisted operator list with IDs and access tech
   size_t currentOperatorIndex_ = 0;               // Track position in manual mode
+  uint32_t currentOperatorId_ = 0;                // Current operator PLMN ID
   bool isManualMode_ = false;                     // Track if currently in manual operator selection mode
 
 public:
@@ -113,6 +114,11 @@ public:
   CellReturnStatus mqttDisconnect();
   CellReturnStatus mqttPublish(const std::string &topic, const std::string &payload, int qos = 1,
                                int retain = 0, int timeoutS = 15);
+
+  // Operator serialization/deserialization
+  bool setOperators(const std::string &serialized, uint32_t operatorId);
+  std::string getSerializedOperators() const;
+  uint32_t getCurrentOperatorId() const;
 
 private:
   const int DEFAULT_HTTP_CONNECT_TIMEOUT = 120; // seconds
