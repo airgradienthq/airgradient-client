@@ -283,11 +283,13 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
 
   // Time tracking
   uint32_t startOperationTime = MILLIS();
-  uint32_t manualOperatorStartTime = 0;  // Track time per operator in manual mode (30 sec timeout)
+  uint32_t manualOperatorStartTime = 0;  // Track time per operator in manual mode (60 sec timeout)
+  uint32_t serviceStatusStartTime = 0;   // Track time in CHECK_SERVICE_STATUS (30 sec timeout)
 
   // Track operator list exhaustion (full iterations through all operators)
   uint32_t operatorListExhaustedCount = 0;
   const uint32_t MAX_OPERATOR_LIST_EXHAUSTION = 3;
+  const uint32_t SERVICE_STATUS_TIMEOUT = 30000;  // 30 seconds
 
   NetworkRegistrationState state = CHECK_MODULE_READY;
   bool finish = false;
@@ -349,11 +351,24 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
 
     case CHECK_NETWORK_REGISTRATION:
       state = _implCheckNetworkRegistration(ct, manualOperatorStartTime);
+      // Reset service status timer when entering CHECK_SERVICE_STATUS
+      if (state == CHECK_SERVICE_STATUS) {
+        serviceStatusStartTime = MILLIS();
+      }
       break;
 
-    case CHECK_SERVICE_STATUS:
-      state = _implCheckServiceStatus(apn);
+    case CHECK_SERVICE_STATUS: {
+      state = _implCheckServiceStatus();
+      // Check if checking service status is timeout
+      if ((MILLIS() - serviceStatusStartTime) > SERVICE_STATUS_TIMEOUT) {
+        AG_LOGW(TAG, "Service status check timed out after 30s, re-checking registration");
+        manualOperatorStartTime = MILLIS();  // Fresh 60s for operator
+        serviceStatusStartTime = 0;           // Reset for next service check
+        state = CHECK_NETWORK_REGISTRATION;
+        continue;
+      }
       break;
+    }
 
     case NETWORK_READY:
       state = _implNetworkReady();
@@ -1045,7 +1060,7 @@ CellularModuleA7672XX::_implConfigureManualNetwork() {
 }
 
 CellularModuleA7672XX::NetworkRegistrationState
-CellularModuleA7672XX::_implCheckServiceStatus(const std::string &apn) {
+CellularModuleA7672XX::_implCheckServiceStatus() {
   AG_LOGI(TAG, "Checking service status");
 
   // Inquiring UE system information

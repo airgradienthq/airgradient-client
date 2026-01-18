@@ -131,7 +131,7 @@ private:
   NetworkRegistrationState _implConfigureManualNetwork();
   NetworkRegistrationState _implCheckNetworkRegistration(CellTechnology ct,
                                                           uint32_t manualOperatorStartTime);
-  NetworkRegistrationState _implCheckServiceStatus(const std::string &apn);
+  NetworkRegistrationState _implCheckServiceStatus();
   NetworkRegistrationState _implNetworkReady();
 
   // AT Command functions
