@@ -22,6 +22,7 @@
 #include "cellularModule.h"
 
 #define REGIS_RETRY_DELAY() DELAY_MS(1000);
+#define TIMEOUT_WAIT_REGISTERED 60000
 
 CellularModuleA7672XX::CellularModuleA7672XX(AirgradientSerial *agSerial, uint32_t warmUpTimeMs) {
   agSerial_ = agSerial;
@@ -284,6 +285,10 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
   uint32_t startOperationTime = MILLIS();
   uint32_t manualOperatorStartTime = 0;  // Track time per operator in manual mode (30 sec timeout)
 
+  // Track operator list exhaustion (full iterations through all operators)
+  uint32_t operatorListExhaustedCount = 0;
+  const uint32_t MAX_OPERATOR_LIST_EXHAUSTION = 3;
+
   NetworkRegistrationState state = CHECK_MODULE_READY;
   bool finish = false;
 
@@ -316,6 +321,31 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
       // Reset manual operator timer when selecting new operator
       manualOperatorStartTime = MILLIS();
       break;
+
+    case OPERATOR_LIST_EXHAUSTED: {
+      // All operators exhausted, increment exhaustion counter
+      operatorListExhaustedCount++;
+      AG_LOGW(TAG, "Operator list exhausted (attempt %" PRIu32 " of %" PRIu32 ")",
+              operatorListExhaustedCount, MAX_OPERATOR_LIST_EXHAUSTION);
+
+      if (operatorListExhaustedCount >= MAX_OPERATOR_LIST_EXHAUSTION) {
+        // Reached maximum exhaustion attempts, fail registration
+        AG_LOGE(TAG, "Failed after %" PRIu32 " full iterations through operator list",
+                MAX_OPERATOR_LIST_EXHAUSTION);
+        // Clear operator list and saved operator
+        availableOperators_.clear();
+        currentOperatorId_ = 0;
+        currentOperatorIndex_ = 0;
+        finish = true;
+        continue;
+      }
+
+      // Haven't reached max attempts yet, reset index and try again
+      AG_LOGI(TAG, "Resetting operator index to retry from beginning");
+      currentOperatorIndex_ = 0;
+      state = CONFIGURE_MANUAL_NETWORK;  // Continue with retry
+      break;
+    }
 
     case CHECK_NETWORK_REGISTRATION:
       state = _implCheckNetworkRegistration(ct, manualOperatorStartTime);
@@ -900,9 +930,8 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
     }
   }
 
-  // Not registered, check timeout (30 seconds per operator)
-  // TODO: Make a const variable and also change this to 60 seconds perhaps
-  if ((MILLIS() - manualOperatorStartTime) > 60000) {
+  // Not registered, check timeout
+  if ((MILLIS() - manualOperatorStartTime) > TIMEOUT_WAIT_REGISTERED) {
     AG_LOGW(TAG, "Not registered with current operator after 60 seconds, trying next");
     currentOperatorId_ = 0;  // Clear saved operator
     currentOperatorIndex_++;
@@ -995,8 +1024,7 @@ CellularModuleA7672XX::_implConfigureManualNetwork() {
   // Check if we have exhausted all operators
   if (availableOperators_.empty() || currentOperatorIndex_ >= availableOperators_.size()) {
     AG_LOGE(TAG, "No more operators to try, all exhausted");
-    // TODO: Improve this error
-    return CHECK_MODULE_READY;  // Will fail the registration
+    return OPERATOR_LIST_EXHAUSTED;
   }
 
   OperatorInfo opInfo = availableOperators_[currentOperatorIndex_];
@@ -1019,6 +1047,10 @@ CellularModuleA7672XX::_implConfigureManualNetwork() {
 CellularModuleA7672XX::NetworkRegistrationState
 CellularModuleA7672XX::_implCheckServiceStatus(const std::string &apn) {
   AG_LOGI(TAG, "Checking service status");
+
+  // Inquiring UE system information
+  at_->sendAT("+CPSI?");
+  at_->waitResponse();
 
   // Check if service is available
   CellReturnStatus crs = _isServiceAvailable();
@@ -1179,8 +1211,13 @@ CellReturnStatus CellularModuleA7672XX::_applyOperatorSelection(uint32_t operato
   }
 
   // Timeout based on datasheet
-  if (at_->waitResponse(60000) != ATCommandHandler::ExpArg1) {
-    AG_LOGW(TAG, "Failed to apply operator selection");
+  auto result = at_->waitResponse(60000);
+  if (result == ATCommandHandler::Timeout) {
+    AG_LOGW(TAG, "Timeout to apply operator selection");
+    return CellReturnStatus::Timeout;
+  }
+  else if (result != ATCommandHandler::ExpArg2) {
+    AG_LOGW(TAG, "Error to apply operator selection");
     return CellReturnStatus::Error;
   }
 
@@ -1202,24 +1239,6 @@ CellReturnStatus CellularModuleA7672XX::_checkOperatorSelection() {
   }
 
   // receive OK response from the buffer, ignore it
-  at_->waitResponse();
-
-  return crs;
-}
-
-CellReturnStatus CellularModuleA7672XX::_printNetworkInfo() {
-  auto crs = CellReturnStatus::Ok;
-  at_->sendAT("+CNBP?");
-  at_->waitResponse();
-
-  AG_LOGI(TAG, "Wait to list operator selections..");
-  at_->sendAT("+COPS=?");
-  at_->waitResponse(60000);
-
-  at_->sendAT("+CPSI?");
-  at_->waitResponse();
-
-  at_->sendAT("+CGDCONT?");
   at_->waitResponse();
 
   return crs;

@@ -72,6 +72,8 @@ public:
     SCAN_OPERATOR,
     // Configure manual operator selection by iterating through scanned operator list
     CONFIGURE_MANUAL_NETWORK,
+    // All operators in list have been tried without success
+    OPERATOR_LIST_EXHAUSTED,
     // Check network registration status (CREG/CEREG/CGREG) and signal quality
     CHECK_NETWORK_REGISTRATION,
     // Ensure service available (CNSMOD), Activate PDP context, Check packet domain attached
@@ -138,7 +140,6 @@ private:
   CellReturnStatus _applyCellularTechnology(CellTechnology ct);
   CellReturnStatus _applyOperatorSelection(uint32_t operatorId, int accessTech = -1);
   CellReturnStatus _checkOperatorSelection();
-  CellReturnStatus _printNetworkInfo();
   CellReturnStatus _isServiceAvailable();
   CellReturnStatus _applyAPN(const std::string &apn);
   CellReturnStatus _ensurePacketDomainAttached(bool forceAttach);
