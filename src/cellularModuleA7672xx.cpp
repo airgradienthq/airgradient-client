@@ -282,7 +282,6 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
 
   // Time tracking
   uint32_t startOperationTime = MILLIS();
-  uint32_t autoModeStartTime = 0;        // Track time in auto mode (2 min timeout)
   uint32_t manualOperatorStartTime = 0;  // Track time per operator in manual mode (30 sec timeout)
 
   NetworkRegistrationState state = CHECK_MODULE_READY;
@@ -312,12 +311,6 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
       state = _implScanOperator(scanTimeoutMs);
       break;
 
-    case CONFIGURE_AUTO_NETWORK:
-      state = _implConfigureAutoNetwork();
-      // Reset auto mode timer when entering auto mode
-      autoModeStartTime = MILLIS();
-      break;
-
     case CONFIGURE_MANUAL_NETWORK:
       state = _implConfigureManualNetwork();
       // Reset manual operator timer when selecting new operator
@@ -325,7 +318,7 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
       break;
 
     case CHECK_NETWORK_REGISTRATION:
-      state = _implCheckNetworkRegistration(ct, autoModeStartTime, manualOperatorStartTime);
+      state = _implCheckNetworkRegistration(ct, manualOperatorStartTime);
       break;
 
     case CHECK_SERVICE_STATUS:
@@ -343,7 +336,7 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
     }
 
     // Give CPU a break
-    DELAY_MS(1);
+    DELAY_MS(10);
   }
 
   if (state != NETWORK_READY) {
@@ -828,34 +821,13 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implChec
     return CHECK_MODULE_READY;
   }
 
-  // Detect if module is already prepared by checking current operator mode
-  CellResult<std::string> modeResult = _detectCurrentOperatorMode();
-
-  if (modeResult.status == CellReturnStatus::Ok) {
-    // Module is prepared and has operator configuration
-    if (modeResult.data == "auto") {
-      AG_LOGI(TAG, "Module already prepared in automatic mode, continue to: CONFIGURE_AUTO_NETWORK");
-      isManualMode_ = false;
-      return CONFIGURE_AUTO_NETWORK;
-    } else if (modeResult.data != "unknown") {
-      AG_LOGI(TAG, "Module already prepared in manual mode, continue to: CONFIGURE_MANUAL_NETWORK");
-      isManualMode_ = true;
-      // If we don't have operator list yet, we need to scan first
-      if (availableOperators_.empty()) {
-        AG_LOGI(TAG, "No operator list available, need to scan first");
-        return PREPARE_MODULE;
-      }
-      return CONFIGURE_MANUAL_NETWORK;
-    }
-  }
-
-  // Module not prepared or detection failed, prepare from scratch
-  AG_LOGI(TAG, "Module not prepared, continue to: PREPARE_MODULE");
+  // Module and SIM ready, always prepare module
+  AG_LOGI(TAG, "Module and SIM ready, continue to: PREPARE_MODULE");
   return PREPARE_MODULE;
 }
 
 CellularModuleA7672XX::NetworkRegistrationState
-CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct, uint32_t autoModeStartTime,
+CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
                                                       uint32_t manualOperatorStartTime) {
   // Get detailed registration status
   CellResult<RegistrationStatus> statusResult = _checkDetailedRegistrationStatus(ct);
@@ -876,12 +848,8 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct, uint32_t
   CellResult<int> signalResult = retrieveSignal();
   int signal = (signalResult.status == CellReturnStatus::Ok) ? signalResult.data : 99;
 
-  // Always query operator attachment for logging
-  CellResult<std::string> copsResult = _detectCurrentOperatorMode();
-  std::string copsInfo = (copsResult.status == CellReturnStatus::Ok) ? copsResult.data : "unknown";
-
-  // Log all three values together for debugging
-  AG_LOGI(TAG, "Registration check - Status: %d, Signal: %d, COPS: %s", stat, signal, copsInfo.c_str());
+  // Log status and signal for debugging
+  AG_LOGI(TAG, "Registration check - Status: %d, Signal: %d", stat, signal);
 
   // Check for registered states (1 = home, 5 = roaming)
   if (stat == 1 || stat == 5) {
@@ -901,39 +869,50 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct, uint32_t
     return CHECK_SERVICE_STATUS;
   }
 
-  // Not registered - handle based on mode and status code
-  if (!isManualMode_) {
-    // AUTO MODE
-    // Check for denied (3) or emergency bearer only (11)
-    if (stat == 3 || stat == 11) {
-      AG_LOGW(TAG, "Registration denied or restricted (status=%d)", stat);
-      // Switch to manual mode if we've been trying auto for 2 minutes
-      if ((MILLIS() - autoModeStartTime) > 120000) {
-        AG_LOGI(TAG, "Auto mode failed after 2 minutes, switching to manual mode");
-        return CONFIGURE_MANUAL_NETWORK;
+  // Check for denied (3) or emergency bearer only (11) - fail fast with confirmation
+  if (stat == 3 || stat == 11) {
+    AG_LOGW(TAG, "Registration denied or emergency only (status=%d), confirming for 10 seconds", stat);
+
+    // Wait 10 seconds to confirm it's persistent (not transient)
+    uint32_t deniedStartTime = MILLIS();
+    while ((MILLIS() - deniedStartTime) < 10000) {  // 10 second confirmation
+      DELAY_MS(1000);
+
+      // Re-check status
+      statusResult = _checkDetailedRegistrationStatus(ct);
+      if (statusResult.status == CellReturnStatus::Ok) {
+        int newStat = statusResult.data.stat;
+        if (newStat == 1 || newStat == 5) {
+          // Status changed to registered during confirmation period
+          AG_LOGI(TAG, "Status changed to registered (stat=%d) during confirmation", newStat);
+          return CHECK_NETWORK_REGISTRATION;
+        }
+        stat = newStat;
       }
-    } else if ((MILLIS() - autoModeStartTime) > 120000) {
-      // Not registered after 2 minutes in auto mode
-      AG_LOGW(TAG, "Not registered after 2 minutes in auto mode, switching to manual");
-      return CONFIGURE_MANUAL_NETWORK;
     }
 
-    // Still trying in auto mode
-    REGIS_RETRY_DELAY();
-    return CHECK_NETWORK_REGISTRATION;
-  } else {
-    // MANUAL MODE
-    // Check if we've been trying this operator for 30 seconds
-    if ((MILLIS() - manualOperatorStartTime) > 30000) {
-      AG_LOGW(TAG, "Not registered with current operator after 30 seconds, trying next");
+    // Still denied/emergency after confirmation period
+    if (stat == 3 || stat == 11) {
+      AG_LOGW(TAG, "Registration still denied/emergency (status=%d) after 10s, trying next operator", stat);
+      currentOperatorId_ = 0;  // Clear saved operator
       currentOperatorIndex_++;
       return CONFIGURE_MANUAL_NETWORK;
     }
-
-    // Still trying current operator
-    REGIS_RETRY_DELAY();
-    return CHECK_NETWORK_REGISTRATION;
   }
+
+  // Not registered, check timeout (30 seconds per operator)
+  // TODO: Make a const variable and also change this to 60 seconds perhaps
+  if ((MILLIS() - manualOperatorStartTime) > 60000) {
+    AG_LOGW(TAG, "Not registered with current operator after 60 seconds, trying next");
+    currentOperatorId_ = 0;  // Clear saved operator
+    currentOperatorIndex_++;
+    return CONFIGURE_MANUAL_NETWORK;
+  }
+
+  // Still trying current operator
+  // REGIS_RETRY_DELAY();
+  DELAY_MS(3000);
+  return CHECK_NETWORK_REGISTRATION;
 }
 
 // New state machine implementations
@@ -961,8 +940,15 @@ CellularModuleA7672XX::_implPrepareModule(CellTechnology ct, const std::string &
     return CHECK_MODULE_READY;
   }
 
-  AG_LOGI(TAG, "Module prepared, continue to: SCAN_OPERATOR");
-  return SCAN_OPERATOR;
+  // Check if we have operator list
+  if (availableOperators_.empty()) {
+    AG_LOGI(TAG, "No operator list available, continue to: SCAN_OPERATOR");
+    return SCAN_OPERATOR;
+  } else {
+    AG_LOGI(TAG, "Operator list available (%zu operators), continue to: CONFIGURE_MANUAL_NETWORK",
+            availableOperators_.size());
+    return CONFIGURE_MANUAL_NETWORK;
+  }
 }
 
 CellularModuleA7672XX::NetworkRegistrationState
@@ -983,44 +969,34 @@ CellularModuleA7672XX::_implScanOperator(uint32_t scanTimeoutMs) {
   availableOperators_ = scanResult.data;
   currentOperatorIndex_ = 0;
 
-  AG_LOGI(TAG, "Operator scan complete, continue to: CONFIGURE_AUTO_NETWORK");
-  return CONFIGURE_AUTO_NETWORK;
-}
-
-CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implConfigureAutoNetwork() {
-  AG_LOGI(TAG, "Configuring automatic operator selection");
-
-  // Set preferred bands
-  CellReturnStatus crs = _applyPreferedBands();
-  if (crs == CellReturnStatus::Timeout) {
-    return CHECK_MODULE_READY;
-  }
-
-  // Wait for band settings to be applied
-  AG_LOGI(TAG, "Waiting for band settings to be applied (5s)");
-  DELAY_MS(5000);
-
-  // Set automatic operator selection
-  crs = _applyOperatorSelection(0, -1);  // operatorId=0 means automatic
-  if (crs == CellReturnStatus::Timeout) {
-    return CHECK_MODULE_READY;
-  } else if (crs != CellReturnStatus::Ok) {
-    AG_LOGW(TAG, "Failed to set automatic operator selection");
-    return CHECK_MODULE_READY;
-  }
-
-  isManualMode_ = false;
-  AG_LOGI(TAG, "Automatic mode configured, continue to: CHECK_NETWORK_REGISTRATION");
-  return CHECK_NETWORK_REGISTRATION;
+  AG_LOGI(TAG, "Operator scan complete, continue to: CONFIGURE_MANUAL_NETWORK");
+  return CONFIGURE_MANUAL_NETWORK;
 }
 
 CellularModuleA7672XX::NetworkRegistrationState
 CellularModuleA7672XX::_implConfigureManualNetwork() {
-  // Check if we have operators to try
+  // If we have a saved successful operator, try to find it and use it first
+  if (currentOperatorId_ != 0 && currentOperatorIndex_ == 0) {
+    AG_LOGI(TAG, "Searching for saved operator %" PRIu32 " in list", currentOperatorId_);
+    for (size_t i = 0; i < availableOperators_.size(); i++) {
+      if (availableOperators_[i].operatorId == currentOperatorId_) {
+        currentOperatorIndex_ = i;
+        AG_LOGI(TAG, "Found saved operator at index %zu, trying it first", i);
+        break;
+      }
+    }
+    // If not found, currentOperatorIndex_ stays at 0 (start from beginning)
+    if (currentOperatorIndex_ == 0 && (availableOperators_.empty() ||
+        availableOperators_[0].operatorId != currentOperatorId_)) {
+      AG_LOGW(TAG, "Saved operator %" PRIu32 " not found in list, starting from beginning", currentOperatorId_);
+    }
+  }
+
+  // Check if we have exhausted all operators
   if (availableOperators_.empty() || currentOperatorIndex_ >= availableOperators_.size()) {
-    AG_LOGW(TAG, "No more operators to try in manual mode, falling back to automatic");
-    currentOperatorIndex_ = 0;
-    return CONFIGURE_AUTO_NETWORK;
+    AG_LOGE(TAG, "No more operators to try, all exhausted");
+    // TODO: Improve this error
+    return CHECK_MODULE_READY;  // Will fail the registration
   }
 
   OperatorInfo opInfo = availableOperators_[currentOperatorIndex_];
@@ -1036,7 +1012,6 @@ CellularModuleA7672XX::_implConfigureManualNetwork() {
     return CONFIGURE_MANUAL_NETWORK;
   }
 
-  isManualMode_ = true;
   AG_LOGI(TAG, "Manual operator configured, continue to: CHECK_NETWORK_REGISTRATION");
   return CHECK_NETWORK_REGISTRATION;
 }
@@ -1104,10 +1079,11 @@ CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implNetw
 
   AG_LOGI(TAG, "IP Addr: %s", ipResult.data.c_str());
 
-  // If in manual mode and successfully connected, log the operator
-  if (isManualMode_ && currentOperatorIndex_ < availableOperators_.size()) {
+  // Save the successful operator for future connections
+  if (currentOperatorIndex_ < availableOperators_.size()) {
     OperatorInfo opInfo = availableOperators_[currentOperatorIndex_];
-    AG_LOGI(TAG, "Successfully registered with manual operator: %" PRIu32 " (AcT: %d)",
+    currentOperatorId_ = opInfo.operatorId;
+    AG_LOGI(TAG, "Successfully registered with operator: %" PRIu32 " (AcT: %d), saved for next connection",
             opInfo.operatorId, opInfo.accessTech);
   }
 
@@ -1183,18 +1159,6 @@ CellReturnStatus CellularModuleA7672XX::_applyCellularTechnology(CellTechnology 
   return CellReturnStatus::Ok;
 }
 
-CellReturnStatus CellularModuleA7672XX::_applyPreferedBands() {
-  // Attempt to apply all bands supported (might be different based on the region)
-  // Apply for both 2G and 4G
-  at_->sendAT("+CNBP=0xFFFFFFFF7FFFFFFF,0x000007FF3FDF3FFF,0x000F");
-  if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
-    // TODO: This should be error or timeout
-    return CellReturnStatus::Error;
-  }
-
-  return CellReturnStatus::Ok;
-}
-
 CellReturnStatus CellularModuleA7672XX::_applyOperatorSelection(uint32_t operatorId, int accessTech) {
   char buf[50] = {0};
 
@@ -1214,7 +1178,8 @@ CellReturnStatus CellularModuleA7672XX::_applyOperatorSelection(uint32_t operato
     at_->sendAT(buf);
   }
 
-  if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
+  // Timeout based on datasheet
+  if (at_->waitResponse(60000) != ATCommandHandler::ExpArg1) {
     AG_LOGW(TAG, "Failed to apply operator selection");
     return CellReturnStatus::Error;
   }

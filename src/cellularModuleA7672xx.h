@@ -54,8 +54,7 @@ private:
   // Operator selection for manual network registration
   std::vector<OperatorInfo> availableOperators_;  // Persisted operator list with IDs and access tech
   size_t currentOperatorIndex_ = 0;               // Track position in manual mode
-  uint32_t currentOperatorId_ = 0;                // Current operator PLMN ID
-  bool isManualMode_ = false;                     // Track if currently in manual operator selection mode
+  uint32_t currentOperatorId_ = 0;                // Current operator PLMN ID (saved successful operator)
 
 public:
   // Structure to hold detailed registration status
@@ -65,14 +64,12 @@ public:
   };
 
   enum NetworkRegistrationState {
-    // Check if AT ready, Check if SIM ready, Detect if module already prepared
+    // Check if AT ready, Check if SIM ready
     CHECK_MODULE_READY,
     // Disable network registration URC, Set cellular technology, Set APN
     PREPARE_MODULE,
     // Scan available operators (AT+COPS=?) and populate operator list
     SCAN_OPERATOR,
-    // Configure automatic operator selection (AT+COPS=0,2)
-    CONFIGURE_AUTO_NETWORK,
     // Configure manual operator selection by iterating through scanned operator list
     CONFIGURE_MANUAL_NETWORK,
     // Check network registration status (CREG/CEREG/CGREG) and signal quality
@@ -129,9 +126,8 @@ private:
   NetworkRegistrationState _implCheckModuleReady();
   NetworkRegistrationState _implPrepareModule(CellTechnology ct, const std::string &apn);
   NetworkRegistrationState _implScanOperator(uint32_t scanTimeoutMs);
-  NetworkRegistrationState _implConfigureAutoNetwork();
   NetworkRegistrationState _implConfigureManualNetwork();
-  NetworkRegistrationState _implCheckNetworkRegistration(CellTechnology ct, uint32_t autoModeStartTime,
+  NetworkRegistrationState _implCheckNetworkRegistration(CellTechnology ct,
                                                           uint32_t manualOperatorStartTime);
   NetworkRegistrationState _implCheckServiceStatus(const std::string &apn);
   NetworkRegistrationState _implNetworkReady();
@@ -140,8 +136,7 @@ private:
   CellReturnStatus _disableNetworkRegistrationURC(CellTechnology ct); // depend on CellTech
   CellReturnStatus _checkAllRegistrationStatusCommand();
   CellReturnStatus _applyCellularTechnology(CellTechnology ct);
-  CellReturnStatus _applyPreferedBands();
-  CellReturnStatus _applyOperatorSelection(uint32_t operatorId = 0, int accessTech = -1); // operatorId=0 means auto mode
+  CellReturnStatus _applyOperatorSelection(uint32_t operatorId, int accessTech = -1);
   CellReturnStatus _checkOperatorSelection();
   CellReturnStatus _printNetworkInfo();
   CellReturnStatus _isServiceAvailable();
