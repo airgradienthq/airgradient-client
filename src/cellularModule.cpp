@@ -37,7 +37,8 @@ CellReturnStatus CellularModule::isNetworkRegistered(CellTechnology ct) {
 
 CellResult<std::string> CellularModule::startNetworkRegistration(CellTechnology ct,
                                                                  const std::string &apn,
-                                                                 uint32_t operationTimeoutMs) {
+                                                                 uint32_t operationTimeoutMs,
+                                                                 uint32_t scanTimeoutMs) {
   return CellResult<std::string>();
 }
 

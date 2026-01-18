@@ -52,7 +52,8 @@ public:
   virtual CellReturnStatus isNetworkRegistered(CellTechnology ct);
   virtual CellResult<std::string> startNetworkRegistration(CellTechnology ct,
                                                            const std::string &apn,
-                                                           uint32_t operationTimeoutMs = 90000);
+                                                           uint32_t operationTimeoutMs = 90000,
+                                                           uint32_t scanTimeoutMs = 600000);
   virtual CellReturnStatus reinitialize();
   virtual CellResult<HttpResponse> httpGet(const std::string &url, int connectionTimeout = -1,
                                            int responseTimeout = -1);
