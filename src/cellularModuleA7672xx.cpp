@@ -1045,9 +1045,11 @@ CellularModuleA7672XX::_implConfigureManualNetwork() {
   OperatorInfo opInfo = availableOperators_[currentOperatorIndex_];
   AG_LOGI(TAG, "Configuring manual operator: %" PRIu32 " with AcT: %d (index %zu of %zu)",
           opInfo.operatorId, opInfo.accessTech, currentOperatorIndex_ + 1, availableOperators_.size());
+  DELAY_MS(5000);
 
   CellReturnStatus crs = _applyOperatorSelection(opInfo.operatorId, opInfo.accessTech);
   if (crs == CellReturnStatus::Timeout) {
+    currentOperatorIndex_++;
     return CHECK_MODULE_READY;
   } else if (crs != CellReturnStatus::Ok) {
     AG_LOGW(TAG, "Failed to select operator %" PRIu32 ", trying next", opInfo.operatorId);
@@ -1231,7 +1233,7 @@ CellReturnStatus CellularModuleA7672XX::_applyOperatorSelection(uint32_t operato
     AG_LOGW(TAG, "Timeout to apply operator selection");
     return CellReturnStatus::Timeout;
   }
-  else if (result != ATCommandHandler::ExpArg2) {
+  else if (result == ATCommandHandler::ExpArg2) {
     AG_LOGW(TAG, "Error to apply operator selection");
     return CellReturnStatus::Error;
   }
