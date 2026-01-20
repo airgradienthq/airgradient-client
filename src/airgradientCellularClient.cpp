@@ -79,7 +79,7 @@ void AirgradientCellularClient::setNetworkRegistrationTimeoutMs(int timeoutMs) {
 std::string AirgradientCellularClient::getICCID() { return _iccid; }
 
 bool AirgradientCellularClient::ensureClientConnection(bool reset) {
-  AG_LOGE(TAG, "Ensuring client connection, restarting cellular module");
+  AG_LOGI(TAG, "Ensuring client connection, restarting cellular module");
   if (reset) {
     if (cell_->reset() == false) {
       AG_LOGW(TAG, "Reset failed, power cycle module...");

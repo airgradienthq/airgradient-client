@@ -342,10 +342,22 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
         continue;
       }
 
-      // Haven't reached max attempts yet, reset index and try again
+      // Reset module to ensure the next registration attempt in clean state
+      // In case every operator return 3 or 11
+      if (reset() == false) {
+        AG_LOGW(TAG, "Reset failed, power cycle module...");
+        powerOff(true);
+        DELAY_MS(2000);
+        powerOn();
+      }
+      AG_LOGI(TAG, "Wait for 10s for module to warming up");
+      DELAY_MS(10000);
+      reinitialize();
+
+      // Haven't reached max attempts yet, reset index start over
       AG_LOGI(TAG, "Resetting operator index to retry from beginning");
       currentOperatorIndex_ = 0;
-      state = CONFIGURE_MANUAL_NETWORK;  // Continue with retry
+      state = CHECK_MODULE_READY;
       break;
     }
 
