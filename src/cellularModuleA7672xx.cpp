@@ -920,6 +920,14 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
       AG_LOGW(TAG, "Invalid signal: %d", signal);
       REGIS_RETRY_DELAY();
       return CHECK_NETWORK_REGISTRATION;
+    } else if (signal < 10) {
+      AG_LOGW(TAG,
+              "This operator %" PRIu32 " has really low signal %d (csq), moving on..",
+              currentOperatorId_, signal);
+      currentOperatorId_ = 0; // Clear saved operator
+      currentOperatorIndex_++;
+      REGIS_RETRY_DELAY();
+      return CONFIGURE_MANUAL_NETWORK;
     }
 
     AG_LOGI(TAG, "Registered successfully, continue to: CHECK_SERVICE_STATUS");
