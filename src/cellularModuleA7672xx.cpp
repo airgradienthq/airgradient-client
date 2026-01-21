@@ -22,6 +22,7 @@
 #include "cellularModule.h"
 
 #define REGIS_RETRY_DELAY() DELAY_MS(1000);
+#define TIMEOUT_WAIT_REGISTERED 60000
 
 CellularModuleA7672XX::CellularModuleA7672XX(AirgradientSerial *agSerial, uint32_t warmUpTimeMs) {
   agSerial_ = agSerial;
@@ -269,7 +270,8 @@ CellReturnStatus CellularModuleA7672XX::isNetworkRegistered(CellTechnology ct) {
 
 CellResult<std::string>
 CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::string &apn,
-                                                uint32_t operationTimeoutMs) {
+                                                uint32_t operationTimeoutMs,
+                                                uint32_t scanTimeoutMs) {
   CellResult<std::string> result;
   result.status = CellReturnStatus::Timeout;
 
@@ -279,84 +281,123 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
     return result;
   }
 
-  // start time for whole operation
+  // Time tracking
   uint32_t startOperationTime = MILLIS();
-  // start time for certain state (check network registration and check ensure service ready)
-  uint32_t startStateTime = MILLIS();
+  uint32_t manualOperatorStartTime = 0;  // Track time per operator in manual mode (60 sec timeout)
+  uint32_t serviceStatusStartTime = 0;   // Track time in CHECK_SERVICE_STATUS (30 sec timeout)
+
+  // Track operator list exhaustion (full iterations through all operators)
+  uint32_t operatorListExhaustedCount = 0;
+  const uint32_t MAX_OPERATOR_LIST_EXHAUSTION = 3;
+  const uint32_t SERVICE_STATUS_TIMEOUT = 30000;  // 30 seconds
 
   NetworkRegistrationState state = CHECK_MODULE_READY;
   bool finish = false;
 
-  AG_LOGI(TAG, "Start operation network registration");
+  AG_LOGI(TAG, "Starting network registration (operation timeout: %" PRIu32 " ms, scan timeout: %" PRIu32 " ms)",
+          operationTimeoutMs, scanTimeoutMs);
+
   while ((MILLIS() - startOperationTime) < operationTimeoutMs && !finish) {
     switch (state) {
     case CHECK_MODULE_READY: {
       state = _implCheckModuleReady();
       if (state == CHECK_MODULE_READY) {
-        // No point to retry check if module ready or not
-        // It needs to restarted / power cycled / make sure sim card attached
-        ESP_LOGE(TAG, "CE card is not ready");
+        // Module or SIM not ready - cannot proceed
+        AG_LOGE(TAG, "Module or SIM card is not ready");
         finish = true;
         continue;
       }
       break;
     }
-    case PREPARE_REGISTRATION:
-      state = _implPrepareRegistration(ct);
-      startStateTime = MILLIS();
+
+    case PREPARE_MODULE:
+      state = _implPrepareModule(ct, apn);
       break;
+
+    case SCAN_OPERATOR:
+      state = _implScanOperator(scanTimeoutMs);
+      break;
+
+    case CONFIGURE_MANUAL_NETWORK:
+      state = _implConfigureManualNetwork();
+      // Reset manual operator timer when selecting new operator
+      manualOperatorStartTime = MILLIS();
+      break;
+
+    case OPERATOR_LIST_EXHAUSTED: {
+      // All operators exhausted, increment exhaustion counter
+      operatorListExhaustedCount++;
+      AG_LOGW(TAG, "Operator list exhausted (attempt %" PRIu32 " of %" PRIu32 ")",
+              operatorListExhaustedCount, MAX_OPERATOR_LIST_EXHAUSTION);
+
+      if (operatorListExhaustedCount >= MAX_OPERATOR_LIST_EXHAUSTION) {
+        // Reached maximum exhaustion attempts, fail registration
+        AG_LOGE(TAG, "Failed after %" PRIu32 " full iterations through operator list",
+                MAX_OPERATOR_LIST_EXHAUSTION);
+        // Clear operator list and saved operator
+        availableOperators_.clear();
+        currentOperatorId_ = 0;
+        currentOperatorIndex_ = 0;
+        finish = true;
+        continue;
+      }
+
+      // Reset module to ensure the next registration attempt in clean state
+      // In case every operator return 3 or 11
+      if (reset() == false) {
+        AG_LOGW(TAG, "Reset failed, power cycle module...");
+        powerOff(true);
+        DELAY_MS(2000);
+        powerOn();
+      }
+      AG_LOGI(TAG, "Wait for 10s for module to warming up");
+      DELAY_MS(10000);
+      reinitialize();
+
+      // Haven't reached max attempts yet, reset index start over
+      AG_LOGI(TAG, "Resetting operator index to retry from beginning");
+      currentOperatorIndex_ = 0;
+      state = CHECK_MODULE_READY;
+      break;
+    }
+
     case CHECK_NETWORK_REGISTRATION:
-      if ((MILLIS() - startStateTime) > 15000) {
-        // Timeout wait network registration to expected status, configuring network
-        state = CONFIGURE_NETWORK;
+      state = _implCheckNetworkRegistration(ct, manualOperatorStartTime);
+      // Reset service status timer when entering CHECK_SERVICE_STATUS
+      if (state == CHECK_SERVICE_STATUS) {
+        serviceStatusStartTime = MILLIS();
+      }
+      break;
+
+    case CHECK_SERVICE_STATUS: {
+      state = _implCheckServiceStatus();
+      // Check if checking service status is timeout
+      if ((MILLIS() - serviceStatusStartTime) > SERVICE_STATUS_TIMEOUT) {
+        AG_LOGW(TAG, "Service status check timed out after 30s, re-checking registration");
+        manualOperatorStartTime = MILLIS();  // Fresh 60s for operator
+        serviceStatusStartTime = 0;           // Reset for next service check
+        state = CHECK_NETWORK_REGISTRATION;
         continue;
       }
-      state = _implCheckNetworkRegistration(ct);
-      // If registration status as expected, continue to ENSURE_SERVICE_READY
-      if (state == ENSURE_SERVICE_READY) {
-        // Reset time for ENSURE_SERVICE_READY
-        startStateTime = MILLIS();
-      }
       break;
-    case ENSURE_SERVICE_READY:
-      if ((MILLIS() - startStateTime) > 10000) {
-        // Timeout wait service ready, configuring service
-        state = CONFIGURE_SERVICE;
-        continue;
-      }
-      state = _implEnsureServiceReady();
-      break;
-    case CONFIGURE_NETWORK:
-      // Here's after finish goes back to check network registration status
-      state = _implConfigureNetwork(apn);
-      // After configuring network, check network registration status
-      // Reset time for CHECK_NETWORK_REGISTRATION
-      startStateTime = MILLIS();
-      break;
-    case CONFIGURE_SERVICE:
-      // Here's after finish goes back to check network registration status
-      state = _implConfigureService(apn);
-      // After configuring service, make sure service is now ready
-      // Reset time for ENSURE_SERVICE_READY
-      startStateTime = MILLIS();
-      break;
-    case NETWORK_REGISTERED:
-      state = _implNetworkRegistered();
-      if (state == NETWORK_REGISTERED) {
-        // Still the same state, indicating process finish successfully
+    }
+
+    case NETWORK_READY:
+      state = _implNetworkReady();
+      if (state == NETWORK_READY) {
+        // Network registration complete!
         finish = true;
         continue;
       }
-      // Reset time because it might go back to ENSURE_SERVICE_READY
-      startStateTime = MILLIS();
       break;
     }
+
     // Give CPU a break
-    DELAY_MS(1);
+    DELAY_MS(10);
   }
 
-  if (state != NETWORK_REGISTERED) {
-    AG_LOGW(TAG, "Register to network operation failed!");
+  if (state != NETWORK_READY) {
+    AG_LOGW(TAG, "Network registration failed! Final state: %d", state);
     return result;
   }
 
@@ -824,184 +865,299 @@ CellReturnStatus CellularModuleA7672XX::mqttPublish(const std::string &topic,
 }
 
 CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implCheckModuleReady() {
+  // Check if module responds to AT commands
   if (at_->testAT() == false) {
     REGIS_RETRY_DELAY();
     // TODO: If too long, try reset module
     return CHECK_MODULE_READY;
   }
+
+  // Check if SIM card is ready
   if (isSimReady() != CellReturnStatus::Ok) {
     REGIS_RETRY_DELAY();
     return CHECK_MODULE_READY;
   }
 
-  AG_LOGI(TAG, "Continue: PREPARE_REGISTRATION");
-  return PREPARE_REGISTRATION;
+  // Module and SIM ready, always prepare module
+  AG_LOGI(TAG, "Module and SIM ready, continue to: PREPARE_MODULE");
+  return PREPARE_MODULE;
 }
 
 CellularModuleA7672XX::NetworkRegistrationState
-CellularModuleA7672XX::_implPrepareRegistration(CellTechnology ct) {
-  // TODO: Check result
-  _disableNetworkRegistrationURC(ct);
-  _applyCellularTechnology(ct);
-  AG_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
+CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
+                                                      uint32_t manualOperatorStartTime) {
+  // Get detailed registration status
+  CellResult<RegistrationStatus> statusResult = _checkDetailedRegistrationStatus(ct);
+
+  if (statusResult.status == CellReturnStatus::Timeout) {
+    AG_LOGW(TAG, "Timeout checking registration status");
+    return CHECK_MODULE_READY;
+  }
+
+  if (statusResult.status != CellReturnStatus::Ok) {
+    REGIS_RETRY_DELAY();
+    return CHECK_NETWORK_REGISTRATION;
+  }
+
+  int stat = statusResult.data.stat;
+
+  // Always query signal strength for logging
+  CellResult<int> signalResult = retrieveSignal();
+  int signal = (signalResult.status == CellReturnStatus::Ok) ? signalResult.data : 99;
+
+  // Log status and signal for debugging
+  AG_LOGI(TAG, "Registration check - Status: %d, Signal: %d", stat, signal);
+
+  // Check for registered states (1 = home, 5 = roaming)
+  if (stat == 1 || stat == 5) {
+    // Registered! Validate signal before proceeding
+    if (signalResult.status == CellReturnStatus::Timeout) {
+      return CHECK_MODULE_READY;
+    }
+
+    // Check if returned signal is valid
+    if (signal < 1 || signal > 31) {
+      AG_LOGW(TAG, "Invalid signal: %d", signal);
+      REGIS_RETRY_DELAY();
+      return CHECK_NETWORK_REGISTRATION;
+    } else if (signal < 10) {
+      AG_LOGW(TAG,
+              "This operator %" PRIu32 " has really low signal %d (csq), moving on..",
+              currentOperatorId_, signal);
+      currentOperatorId_ = 0; // Clear saved operator
+      currentOperatorIndex_++;
+      REGIS_RETRY_DELAY();
+      return CONFIGURE_MANUAL_NETWORK;
+    }
+
+    AG_LOGI(TAG, "Registered successfully, continue to: CHECK_SERVICE_STATUS");
+    return CHECK_SERVICE_STATUS;
+  }
+
+  // Check for denied (3) or emergency bearer only (11) - fail fast with confirmation
+  if (stat == 3 || stat == 11) {
+    AG_LOGW(TAG, "Registration denied or emergency only (status=%d), confirming for 10 seconds", stat);
+
+    // Wait 10 seconds to confirm it's persistent (not transient)
+    uint32_t deniedStartTime = MILLIS();
+    while ((MILLIS() - deniedStartTime) < 10000) {  // 10 second confirmation
+      DELAY_MS(1000);
+
+      // Re-check status
+      statusResult = _checkDetailedRegistrationStatus(ct);
+      if (statusResult.status == CellReturnStatus::Ok) {
+        int newStat = statusResult.data.stat;
+        if (newStat == 1 || newStat == 5) {
+          // Status changed to registered during confirmation period
+          AG_LOGI(TAG, "Status changed to registered (stat=%d) during confirmation", newStat);
+          return CHECK_NETWORK_REGISTRATION;
+        }
+        stat = newStat;
+      }
+    }
+
+    // Still denied/emergency after confirmation period
+    if (stat == 3 || stat == 11) {
+      AG_LOGW(TAG, "Registration still denied/emergency (status=%d) after 10s, trying next operator", stat);
+      currentOperatorId_ = 0;  // Clear saved operator
+      currentOperatorIndex_++;
+      return CONFIGURE_MANUAL_NETWORK;
+    }
+  }
+
+  // Not registered, check timeout
+  if ((MILLIS() - manualOperatorStartTime) > TIMEOUT_WAIT_REGISTERED) {
+    AG_LOGW(TAG, "Not registered with current operator after 60 seconds, trying next");
+    currentOperatorId_ = 0;  // Clear saved operator
+    currentOperatorIndex_++;
+    return CONFIGURE_MANUAL_NETWORK;
+  }
+
+  // Still trying current operator
+  // REGIS_RETRY_DELAY();
+  DELAY_MS(3000);
   return CHECK_NETWORK_REGISTRATION;
 }
 
+// New state machine implementations
+
 CellularModuleA7672XX::NetworkRegistrationState
-CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct) {
-  CellReturnStatus crs;
-  if (ct == CellTechnology::Auto) {
-    crs = _checkAllRegistrationStatusCommand();
+CellularModuleA7672XX::_implPrepareModule(CellTechnology ct, const std::string &apn) {
+  AG_LOGI(TAG, "Preparing module for registration");
+
+  // Disable network registration URC
+  CellReturnStatus crs = _disableNetworkRegistrationURC(ct);
+  if (crs == CellReturnStatus::Timeout) {
+    return CHECK_MODULE_READY;
+  }
+
+  // Apply cellular technology
+  crs = _applyCellularTechnology(ct);
+  if (crs != CellReturnStatus::Ok) {
+    AG_LOGW(TAG, "Failed to apply cellular technology");
+    return CHECK_MODULE_READY;
+  }
+
+  // Apply APN
+  crs = _applyAPN(apn);
+  if (crs == CellReturnStatus::Timeout) {
+    return CHECK_MODULE_READY;
+  }
+
+  // Check if we have operator list
+  if (availableOperators_.empty()) {
+    AG_LOGI(TAG, "No operator list available, continue to: SCAN_OPERATOR");
+    return SCAN_OPERATOR;
   } else {
-    crs = isNetworkRegistered(ct);
+    AG_LOGI(TAG, "Operator list available (%zu operators), continue to: CONFIGURE_MANUAL_NETWORK",
+            availableOperators_.size());
+    return CONFIGURE_MANUAL_NETWORK;
   }
-
-  if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
-    return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Failed || crs == CellReturnStatus::Error) {
-    REGIS_RETRY_DELAY();
-    return CHECK_NETWORK_REGISTRATION;
-  }
-
-  CellResult<int> result = retrieveSignal();
-  if (result.status == CellReturnStatus::Timeout) {
-    // Go back to check module ready
-    return CHECK_MODULE_READY;
-  }
-  // Check if returned signal is valid
-  if (result.data < 1 || result.data > 31) {
-    REGIS_RETRY_DELAY();
-    return CHECK_NETWORK_REGISTRATION;
-  }
-
-  AG_LOGI(TAG, "Continue: ENSURE_SERVICE_READY");
-  return ENSURE_SERVICE_READY;
-}
-
-CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implEnsureServiceReady() {
-  CellReturnStatus crs = _isServiceAvailable();
-  if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
-    return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Failed || crs == CellReturnStatus::Error) {
-    REGIS_RETRY_DELAY();
-    return ENSURE_SERVICE_READY;
-  }
-
-  // Check if network attach
-  crs = _ensurePacketDomainAttached(false);
-  if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
-    return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Failed || crs == CellReturnStatus::Error) {
-    REGIS_RETRY_DELAY();
-    return ENSURE_SERVICE_READY;
-  }
-
-  AG_LOGI(TAG, "Continue: NETWORK_REGISTERED");
-  return NETWORK_REGISTERED;
 }
 
 CellularModuleA7672XX::NetworkRegistrationState
-CellularModuleA7672XX::_implConfigureNetwork(const std::string &apn) {
-  CellResult<int> result = retrieveSignal();
-  if (result.status == CellReturnStatus::Timeout) {
-    // Go back to check module ready
+CellularModuleA7672XX::_implScanOperator(uint32_t scanTimeoutMs) {
+  AG_LOGI(TAG, "Scanning for available operators");
+
+  CellResult<std::vector<OperatorInfo>> scanResult = _scanAvailableOperators(scanTimeoutMs);
+
+  if (scanResult.status == CellReturnStatus::Timeout) {
+    AG_LOGW(TAG, "Operator scan timed out");
+    return CHECK_MODULE_READY;
+  } else if (scanResult.status != CellReturnStatus::Ok || scanResult.data.empty()) {
+    AG_LOGW(TAG, "Operator scan failed or returned no operators");
     return CHECK_MODULE_READY;
   }
 
-  AG_LOGI(TAG, "Cellular signal: %d", result.data);
+  // Store operator list
+  availableOperators_ = scanResult.data;
+  currentOperatorIndex_ = 0;
 
-  CellReturnStatus crs = _applyAPN(apn);
-  if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
-    return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Error) {
-    // TODO: What's next if this return error?
+  AG_LOGI(TAG, "Operator scan complete, continue to: CONFIGURE_MANUAL_NETWORK");
+  return CONFIGURE_MANUAL_NETWORK;
+}
+
+CellularModuleA7672XX::NetworkRegistrationState
+CellularModuleA7672XX::_implConfigureManualNetwork() {
+  // If we have a saved successful operator, try to find it and use it first
+  if (currentOperatorId_ != 0 && currentOperatorIndex_ == 0) {
+    AG_LOGI(TAG, "Searching for saved operator %" PRIu32 " in list", currentOperatorId_);
+    for (size_t i = 0; i < availableOperators_.size(); i++) {
+      if (availableOperators_[i].operatorId == currentOperatorId_) {
+        currentOperatorIndex_ = i;
+        AG_LOGI(TAG, "Found saved operator at index %zu, trying it first", i);
+        break;
+      }
+    }
+    // If not found, currentOperatorIndex_ stays at 0 (start from beginning)
+    if (currentOperatorIndex_ == 0 && (availableOperators_.empty() ||
+        availableOperators_[0].operatorId != currentOperatorId_)) {
+      AG_LOGW(TAG, "Saved operator %" PRIu32 " not found in list, starting from beginning", currentOperatorId_);
+    }
   }
 
-  crs = _checkOperatorSelection();
-  if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
-    return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Ok) {
-    // Result already as expected, go back to check network registration status
-    return CHECK_NETWORK_REGISTRATION;
+  // Check if we have exhausted all operators
+  if (availableOperators_.empty() || currentOperatorIndex_ >= availableOperators_.size()) {
+    AG_LOGE(TAG, "No more operators to try, all exhausted");
+    return OPERATOR_LIST_EXHAUSTED;
   }
 
-  _printNetworkInfo();
-
-  crs = _applyPreferedBands();
-  if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
-    return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Error) {
-    // TODO: What's next if this return error?
-  }
-
-  AG_LOGI(TAG, "Wait band settings to be applied for 5s, before set COPS back to automatic");
+  OperatorInfo opInfo = availableOperators_[currentOperatorIndex_];
+  AG_LOGI(TAG, "Configuring manual operator: %" PRIu32 " with AcT: %d (index %zu of %zu)",
+          opInfo.operatorId, opInfo.accessTech, currentOperatorIndex_ + 1, availableOperators_.size());
   DELAY_MS(5000);
 
-  crs = _applyOperatorSelection();
+  CellReturnStatus crs = _applyOperatorSelection(opInfo.operatorId, opInfo.accessTech);
   if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
+    currentOperatorIndex_++;
     return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Error) {
-    // TODO: What's next if this return error?
+  } else if (crs != CellReturnStatus::Ok) {
+    AG_LOGW(TAG, "Failed to select operator %" PRIu32 ", trying next", opInfo.operatorId);
+    currentOperatorIndex_++;
+    return CONFIGURE_MANUAL_NETWORK;
   }
 
-  AG_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
+  AG_LOGI(TAG, "Manual operator configured, continue to: CHECK_NETWORK_REGISTRATION");
   return CHECK_NETWORK_REGISTRATION;
 }
 
 CellularModuleA7672XX::NetworkRegistrationState
-CellularModuleA7672XX::_implConfigureService(const std::string &apn) {
-  CellReturnStatus crs = _activatePDPContext();
+CellularModuleA7672XX::_implCheckServiceStatus() {
+  AG_LOGI(TAG, "Checking service status");
+
+  // Inquiring UE system information
+  at_->sendAT("+CPSI?");
+  at_->waitResponse();
+
+  // Check if service is available
+  CellReturnStatus crs = _isServiceAvailable();
   if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
     return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Error) {
-    // TODO: What's next if this return error?
+  } else if (crs == CellReturnStatus::Failed || crs == CellReturnStatus::Error) {
+    REGIS_RETRY_DELAY();
+    return CHECK_SERVICE_STATUS;
   }
 
+  // Activate PDP context
+  crs = _activatePDPContext();
+  if (crs == CellReturnStatus::Timeout) {
+    return CHECK_MODULE_READY;
+  } else if (crs == CellReturnStatus::Error) {
+    AG_LOGW(TAG, "Failed to activate PDP context");
+    REGIS_RETRY_DELAY();
+    return CHECK_SERVICE_STATUS;
+  }
+
+  // Ensure packet domain is attached
   crs = _ensurePacketDomainAttached(true);
   if (crs == CellReturnStatus::Timeout) {
-    // Go back to check module ready
     return CHECK_MODULE_READY;
-  } else if (crs == CellReturnStatus::Error) {
-    // TODO: What's next if this return error?
+  } else if (crs == CellReturnStatus::Failed || crs == CellReturnStatus::Error) {
+    REGIS_RETRY_DELAY();
+    return CHECK_SERVICE_STATUS;
   }
 
-  AG_LOGI(TAG, "Continue: CHECK_NETWORK_REGISTRATION");
-  return CHECK_NETWORK_REGISTRATION;
+  AG_LOGI(TAG, "Service ready, continue to: NETWORK_READY");
+  return NETWORK_READY;
 }
 
-CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implNetworkRegistered() {
-  CellResult<int> result = retrieveSignal();
-  if (result.status == CellReturnStatus::Timeout) {
-    // Go back to check module ready
+CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implNetworkReady() {
+  AG_LOGI(TAG, "Verifying network is ready");
+
+  // Check signal quality
+  CellResult<int> signalResult = retrieveSignal();
+  if (signalResult.status == CellReturnStatus::Timeout) {
     return CHECK_MODULE_READY;
   }
 
   // Check if returned signal is valid
-  if (result.data < 1 || result.data > 31) {
+  if (signalResult.data < 1 || signalResult.data > 31) {
+    AG_LOGW(TAG, "Invalid signal strength: %d", signalResult.data);
     REGIS_RETRY_DELAY();
-    return ENSURE_SERVICE_READY;
+    return CHECK_SERVICE_STATUS;
   }
 
-  // print signal
-  AG_LOGI(TAG, "Signal ready at: %d", result.data);
+  AG_LOGI(TAG, "Signal ready at: %d", signalResult.data);
 
-  CellResult<std::string> resultIP = retrieveIPAddr();
-  if (resultIP.data.empty()) {
-    // Sanity check if IP is empty, go back ensure service ready
-    return ENSURE_SERVICE_READY;
+  // Retrieve IP address
+  CellResult<std::string> ipResult = retrieveIPAddr();
+  if (ipResult.data.empty()) {
+    AG_LOGW(TAG, "Failed to retrieve IP address");
+    return CHECK_SERVICE_STATUS;
   }
 
-  AG_LOGI(TAG, "IP Addr: %s", resultIP.data.c_str());
-  AG_LOGI(TAG, "Continue: finish");
-  return NETWORK_REGISTERED;
+  AG_LOGI(TAG, "IP Addr: %s", ipResult.data.c_str());
+
+  // Save the successful operator for future connections
+  if (currentOperatorIndex_ < availableOperators_.size()) {
+    OperatorInfo opInfo = availableOperators_[currentOperatorIndex_];
+    currentOperatorId_ = opInfo.operatorId;
+    AG_LOGI(TAG, "Successfully registered with operator: %" PRIu32 " (AcT: %d), saved for next connection",
+            opInfo.operatorId, opInfo.accessTech);
+  }
+
+  AG_LOGI(TAG, "Network registration complete!");
+  return NETWORK_READY;
 }
 
 CellReturnStatus CellularModuleA7672XX::_disableNetworkRegistrationURC(CellTechnology ct) {
@@ -1072,22 +1228,33 @@ CellReturnStatus CellularModuleA7672XX::_applyCellularTechnology(CellTechnology 
   return CellReturnStatus::Ok;
 }
 
-CellReturnStatus CellularModuleA7672XX::_applyPreferedBands() {
-  // Attempt to apply all bands supported (might be different based on the region)
-  // Apply for both 2G and 4G
-  at_->sendAT("+CNBP=0xFFFFFFFF7FFFFFFF,0x000007FF3FDF3FFF,0x000F");
-  if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
-    // TODO: This should be error or timeout
-    return CellReturnStatus::Error;
+CellReturnStatus CellularModuleA7672XX::_applyOperatorSelection(uint32_t operatorId, int accessTech) {
+  char buf[50] = {0};
+
+  if (operatorId == 0) {
+    // Automatic operator selection
+    AG_LOGI(TAG, "Setting operator selection to automatic mode");
+    at_->sendAT("+COPS=0,2");
+  } else {
+    // Manual operator selection with operator ID and access technology
+    if (accessTech >= 0) {
+      AG_LOGI(TAG, "Setting operator: %" PRIu32 " with AcT: %d", operatorId, accessTech);
+      sprintf(buf, "+COPS=1,2,\"%" PRIu32 "\",%d", operatorId, accessTech);
+    } else {
+      AG_LOGI(TAG, "Setting operator: %" PRIu32 " (no AcT specified)", operatorId);
+      sprintf(buf, "+COPS=1,2,\"%" PRIu32 "\"", operatorId);
+    }
+    at_->sendAT(buf);
   }
 
-  return CellReturnStatus::Ok;
-}
-
-CellReturnStatus CellularModuleA7672XX::_applyOperatorSelection() {
-  at_->sendAT("+COPS=0,2");
-  if (at_->waitResponse() != ATCommandHandler::ExpArg1) {
-    // TODO: This should be error or timeout
+  // Timeout based on datasheet
+  auto result = at_->waitResponse(60000);
+  if (result == ATCommandHandler::Timeout) {
+    AG_LOGW(TAG, "Timeout to apply operator selection");
+    return CellReturnStatus::Timeout;
+  }
+  else if (result == ATCommandHandler::ExpArg2) {
+    AG_LOGW(TAG, "Error to apply operator selection");
     return CellReturnStatus::Error;
   }
 
@@ -1109,24 +1276,6 @@ CellReturnStatus CellularModuleA7672XX::_checkOperatorSelection() {
   }
 
   // receive OK response from the buffer, ignore it
-  at_->waitResponse();
-
-  return crs;
-}
-
-CellReturnStatus CellularModuleA7672XX::_printNetworkInfo() {
-  auto crs = CellReturnStatus::Ok;
-  at_->sendAT("+CNBP?");
-  at_->waitResponse();
-
-  AG_LOGI(TAG, "Wait to list operator selections..");
-  at_->sendAT("+COPS=?");
-  at_->waitResponse(60000);
-
-  at_->sendAT("+CPSI?");
-  at_->waitResponse();
-
-  at_->sendAT("+CGDCONT?");
   at_->waitResponse();
 
   return crs;
@@ -1206,6 +1355,255 @@ CellReturnStatus CellularModuleA7672XX::_activatePDPContext() {
   }
 
   return CellReturnStatus::Ok;
+}
+
+CellResult<std::vector<CellularModuleA7672XX::OperatorInfo>>
+CellularModuleA7672XX::_scanAvailableOperators(uint32_t timeoutMs) {
+  CellResult<std::vector<OperatorInfo>> result;
+  result.status = CellReturnStatus::Timeout;
+
+  AG_LOGI(TAG, "Scanning available operators (this may take up to 10 minutes)...");
+  at_->sendAT("+COPS=?");
+
+  // Wait for response with long timeout (operator scan can take many minutes)
+  if (at_->waitResponse(timeoutMs, "+COPS:") != ATCommandHandler::ExpArg1) {
+    AG_LOGW(TAG, "Timeout or error scanning operators");
+    return result;
+  }
+
+  // Retrieve the full operator list response
+  std::string operatorListRaw;
+  if (at_->waitAndRecvRespLine(operatorListRaw, 2000) == -1) {
+    AG_LOGW(TAG, "Failed to retrieve operator list");
+    return result;
+  }
+
+  // Wait for OK
+  at_->waitResponse();
+
+  AG_LOGD(TAG, "Operator scan response: %s", operatorListRaw.c_str());
+
+  // Parse operator list: (status,"long","short","numeric",tech),(status,...),...
+  // We want to extract "numeric" IDs and tech where status is 1 (available) or 2 (current)
+  std::vector<OperatorInfo> operators;
+  size_t pos = 0;
+
+  while (pos < operatorListRaw.length()) {
+    // Find opening parenthesis
+    size_t openParen = operatorListRaw.find('(', pos);
+    if (openParen == std::string::npos) {
+      break;
+    }
+
+    // Find closing parenthesis
+    size_t closeParen = operatorListRaw.find(')', openParen);
+    if (closeParen == std::string::npos) {
+      break;
+    }
+
+    // Extract the operator entry
+    std::string entry = operatorListRaw.substr(openParen + 1, closeParen - openParen - 1);
+
+    // Parse: status,"long","short","numeric",tech
+    // Split by comma, but be careful with quoted strings
+    std::vector<std::string> parts;
+    bool inQuotes = false;
+    std::string currentPart;
+
+    for (size_t i = 0; i < entry.length(); i++) {
+      char c = entry[i];
+      if (c == '"') {
+        inQuotes = !inQuotes;
+      } else if (c == ',' && !inQuotes) {
+        parts.push_back(currentPart);
+        currentPart.clear();
+      } else {
+        currentPart += c;
+      }
+    }
+    if (!currentPart.empty()) {
+      parts.push_back(currentPart);
+    }
+
+    // Validate we have enough parts and extract numeric ID and access tech
+    if (parts.size() >= 5) {
+      // Parse status manually using atoi (no exceptions)
+      int status = atoi(parts[0].c_str());
+
+      // Only include available (1) or current (2) operators
+      if (status == 1 || status == 2) {
+        // Parse operator ID and access tech as integers
+        uint32_t operatorId = (uint32_t)atoi(parts[3].c_str());
+        int accessTech = atoi(parts[4].c_str());
+
+        if (operatorId > 0) {
+          OperatorInfo opInfo;
+          opInfo.operatorId = operatorId;
+          opInfo.accessTech = accessTech;
+          operators.push_back(opInfo);
+          AG_LOGI(TAG, "Found operator: %" PRIu32 " with AcT: %d (status=%d)",
+                  operatorId, accessTech, status);
+        }
+      }
+    }
+
+    pos = closeParen + 1;
+  }
+
+  if (operators.empty()) {
+    AG_LOGW(TAG, "No available operators found in scan");
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  AG_LOGI(TAG, "Found %zu available operator(s)", operators.size());
+  result.status = CellReturnStatus::Ok;
+  result.data = operators;
+  return result;
+}
+
+CellResult<CellularModuleA7672XX::RegistrationStatus>
+CellularModuleA7672XX::_parseRegistrationStatus(const std::string &response) {
+  CellResult<RegistrationStatus> result;
+  result.status = CellReturnStatus::Failed;
+
+  // Expected format: "0,1" or "1,5" or "0,3" etc.
+  // Format: <n>,<stat>[,<lac>,<ci>,<AcT>]
+
+  // Split by comma to get mode and stat
+  size_t firstComma = response.find(',');
+  if (firstComma == std::string::npos) {
+    AG_LOGW(TAG, "Invalid registration status format: %s", response.c_str());
+    return result;
+  }
+
+  // Parse mode manually using atoi (no exceptions)
+  std::string modeStr = response.substr(0, firstComma);
+  result.data.mode = atoi(modeStr.c_str());
+
+  // Find second comma (if exists) to isolate stat value
+  size_t secondComma = response.find(',', firstComma + 1);
+  std::string statStr;
+  if (secondComma != std::string::npos) {
+    statStr = response.substr(firstComma + 1, secondComma - firstComma - 1);
+  } else {
+    statStr = response.substr(firstComma + 1);
+  }
+
+  // Parse stat manually using atoi (no exceptions)
+  result.data.stat = atoi(statStr.c_str());
+
+  // Basic validation (mode should be 0, 1, or 2)
+  if (result.data.mode < 0 || result.data.mode > 2) {
+    AG_LOGE(TAG, "Invalid registration mode: %d", result.data.mode);
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  result.status = CellReturnStatus::Ok;
+  AG_LOGD(TAG, "Parsed registration status: mode=%d, stat=%d", result.data.mode, result.data.stat);
+
+  return result;
+}
+
+CellResult<CellularModuleA7672XX::RegistrationStatus>
+CellularModuleA7672XX::_checkDetailedRegistrationStatus(CellTechnology ct) {
+  CellResult<RegistrationStatus> result;
+  result.status = CellReturnStatus::Timeout;
+
+  auto cmdNR = _mapCellTechToNetworkRegisCmd(ct);
+  if (cmdNR.empty()) {
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  char buf[15] = {0};
+  sprintf(buf, "+%s?", cmdNR.c_str());
+  at_->sendAT(buf);
+
+  int resp = at_->waitResponse("+CREG:", "+CEREG:", "+CGREG:");
+  if (resp != ATCommandHandler::ExpArg1 && resp != ATCommandHandler::ExpArg2 &&
+      resp != ATCommandHandler::ExpArg3) {
+    AG_LOGW(TAG, "Timeout waiting for registration status response");
+    return result;
+  }
+
+  std::string recv;
+  if (at_->waitAndRecvRespLine(recv) == -1) {
+    AG_LOGW(TAG, "Failed to receive registration status line");
+    return result;
+  }
+
+  // Wait for OK
+  at_->waitResponse();
+
+  // Parse the response
+  return _parseRegistrationStatus(recv);
+}
+
+CellResult<std::string> CellularModuleA7672XX::_detectCurrentOperatorMode() {
+  CellResult<std::string> result;
+  result.status = CellReturnStatus::Timeout;
+
+  at_->sendAT("+COPS?");
+  if (at_->waitResponse("+COPS:") != ATCommandHandler::ExpArg1) {
+    AG_LOGW(TAG, "Timeout querying current operator mode");
+    return result;
+  }
+
+  std::string response;
+  if (at_->waitAndRecvRespLine(response) == -1) {
+    AG_LOGW(TAG, "Failed to receive COPS? response");
+    return result;
+  }
+
+  // Wait for OK
+  at_->waitResponse();
+
+  // Parse response: <mode>,<format>,"<oper>"[,<AcT>]
+  // mode: 0=automatic, 1=manual, 4=manual/automatic
+  size_t firstComma = response.find(',');
+  if (firstComma == std::string::npos) {
+    AG_LOGW(TAG, "Invalid COPS? response format: %s", response.c_str());
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  // Parse mode manually using atoi (no exceptions)
+  std::string modeStr = response.substr(0, firstComma);
+  int mode = atoi(modeStr.c_str());
+
+  // Validate mode value (0=auto, 1=manual, 2=deregister, 3=set format only, 4=manual/auto)
+  if (mode < 0 || mode > 4) {
+    AG_LOGW(TAG, "Invalid COPS mode: %d", mode);
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  if (mode == 0) {
+    result.data = "auto";
+    AG_LOGI(TAG, "Current operator mode: automatic");
+  } else if (mode == 1 || mode == 4) {
+    // Extract operator ID from response
+    // Format after mode: <format>,"<oper>"
+    size_t firstQuote = response.find('"', firstComma);
+    size_t secondQuote = response.find('"', firstQuote + 1);
+
+    if (firstQuote != std::string::npos && secondQuote != std::string::npos) {
+      result.data = response.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+      AG_LOGI(TAG, "Current operator mode: manual, operator=%s", result.data.c_str());
+    } else {
+      result.data = "manual";
+      AG_LOGI(TAG, "Current operator mode: manual (operator ID not parsed)");
+    }
+  } else {
+    result.data = "unknown";
+    AG_LOGW(TAG, "Unknown operator mode: %d", mode);
+  }
+
+  result.status = CellReturnStatus::Ok;
+
+  return result;
 }
 
 CellReturnStatus CellularModuleA7672XX::_httpInit() {
@@ -1430,6 +1828,107 @@ int CellularModuleA7672XX::_calculateResponseTimeout(int connectionTimeout, int 
   }
 
   return waitActionTimeout;
+}
+
+bool CellularModuleA7672XX::setOperators(const std::string &serialized, uint32_t operatorId) {
+  AG_LOGI(TAG, "Setting operators from serialized string: %s, current operatorId: %" PRIu32,
+          serialized.c_str(), operatorId);
+
+  // Clear existing operators
+  availableOperators_.clear();
+  currentOperatorId_ = operatorId;
+  currentOperatorIndex_ = 0;
+
+  // Handle empty string
+  if (serialized.empty()) {
+    AG_LOGI(TAG, "Empty operator string, cleared operator list");
+    return true;
+  }
+
+  // Parse the serialized string format: "46001:7,46002:2,50501:7"
+  size_t start = 0;
+  size_t foundIndex = 0;
+  bool currentOperatorFound = false;
+
+  while (start < serialized.length()) {
+    // Find next comma or end of string
+    size_t commaPos = serialized.find(',', start);
+    if (commaPos == std::string::npos) {
+      commaPos = serialized.length();
+    }
+
+    // Extract entry
+    std::string entry = serialized.substr(start, commaPos - start);
+
+    // Find colon separator
+    size_t colonPos = entry.find(':');
+    if (colonPos == std::string::npos) {
+      AG_LOGW(TAG, "Malformed entry (no colon): %s", entry.c_str());
+      start = commaPos + 1;
+      continue;
+    }
+
+    // Parse operator ID and access tech
+    std::string idStr = entry.substr(0, colonPos);
+    std::string techStr = entry.substr(colonPos + 1);
+
+    uint32_t id = atoi(idStr.c_str());
+    int tech = atoi(techStr.c_str());
+
+    // Validate
+    if (id == 0 && idStr != "0") {
+      AG_LOGW(TAG, "Invalid operator ID in entry: %s", entry.c_str());
+      start = commaPos + 1;
+      continue;
+    }
+
+    // Add to vector
+    OperatorInfo info;
+    info.operatorId = id;
+    info.accessTech = tech;
+    availableOperators_.push_back(info);
+
+    // Check if this is the current operator
+    if (id == operatorId && !currentOperatorFound) {
+      currentOperatorIndex_ = foundIndex;
+      currentOperatorFound = true;
+      AG_LOGI(TAG, "Found current operator at index %zu", currentOperatorIndex_);
+    }
+
+    foundIndex++;
+    start = commaPos + 1;
+  }
+
+  AG_LOGI(TAG, "Loaded %zu operators from serialized string", availableOperators_.size());
+
+  if (!currentOperatorFound && operatorId != 0) {
+    AG_LOGW(TAG, "Current operator ID %" PRIu32 " not found in operator list", operatorId);
+  }
+
+  return true;
+}
+
+std::string CellularModuleA7672XX::getSerializedOperators() const {
+  if (availableOperators_.empty()) {
+    return "";
+  }
+
+  std::string result;
+  for (size_t i = 0; i < availableOperators_.size(); i++) {
+    if (i > 0) {
+      result += ",";
+    }
+
+    char buf[32];
+    sprintf(buf, "%" PRIu32 ":%d", availableOperators_[i].operatorId, availableOperators_[i].accessTech);
+    result += buf;
+  }
+
+  return result;
+}
+
+uint32_t CellularModuleA7672XX::getCurrentOperatorId() const {
+  return currentOperatorId_;
 }
 
 #endif // ESP8266

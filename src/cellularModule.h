@@ -49,10 +49,14 @@ public:
   virtual CellReturnStatus isSimReady();
   virtual CellResult<int> retrieveSignal();
   virtual CellResult<std::string> retrieveIPAddr();
+  virtual bool setOperators(const std::string &serialized, uint32_t operatorId);
+  virtual std::string getSerializedOperators() const;
+  virtual uint32_t getCurrentOperatorId() const;
   virtual CellReturnStatus isNetworkRegistered(CellTechnology ct);
   virtual CellResult<std::string> startNetworkRegistration(CellTechnology ct,
                                                            const std::string &apn,
-                                                           uint32_t operationTimeoutMs = 90000);
+                                                           uint32_t operationTimeoutMs = 90000,
+                                                           uint32_t scanTimeoutMs = 600000);
   virtual CellReturnStatus reinitialize();
   virtual CellResult<HttpResponse> httpGet(const std::string &url, int connectionTimeout = -1,
                                            int responseTimeout = -1);
