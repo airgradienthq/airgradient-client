@@ -35,13 +35,22 @@ CellResult<std::string> CellularModule::resolveDNS(const std::string &hostname) 
   return CellResult<std::string>();
 }
 
+bool CellularModule::setOperators(const std::string &serialized, uint32_t operatorId) {
+  return false;
+}
+
+std::string CellularModule::getSerializedOperators() const { return std::string(); }
+
+uint32_t CellularModule::getCurrentOperatorId() const { return 0; }
+
 CellReturnStatus CellularModule::isNetworkRegistered(CellTechnology ct) {
   return CellReturnStatus();
 }
 
 CellResult<std::string> CellularModule::startNetworkRegistration(CellTechnology ct,
                                                                  const std::string &apn,
-                                                                 uint32_t operationTimeoutMs) {
+                                                                 uint32_t operationTimeoutMs,
+                                                                 uint32_t scanTimeoutMs) {
   return CellResult<std::string>();
 }
 

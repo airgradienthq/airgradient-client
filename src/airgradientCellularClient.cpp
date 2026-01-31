@@ -63,7 +63,7 @@ bool AirgradientCellularClient::begin(std::string sn, PayloadType pt) {
 
   // Register network
   result =
-      cell_->startNetworkRegistration(CellTechnology::Auto, _apn, _networkRegistrationTimeoutMs);
+      cell_->startNetworkRegistration(CellTechnology::LTE, _apn, _networkRegistrationTimeoutMs);
   if (result.status != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Cellular client failed, module cannot register to network");
     return false;
@@ -88,7 +88,7 @@ void AirgradientCellularClient::setNetworkRegistrationTimeoutMs(int timeoutMs) {
 std::string AirgradientCellularClient::getICCID() { return _iccid; }
 
 bool AirgradientCellularClient::ensureClientConnection(bool reset) {
-  AG_LOGE(TAG, "Ensuring client connection, restarting cellular module");
+  AG_LOGI(TAG, "Ensuring client connection, restarting cellular module");
   if (reset) {
     if (cell_->reset() == false) {
       AG_LOGW(TAG, "Reset failed, power cycle module...");
@@ -109,7 +109,7 @@ bool AirgradientCellularClient::ensureClientConnection(bool reset) {
 
   // Register network
   auto result =
-      cell_->startNetworkRegistration(CellTechnology::Auto, _apn, _networkRegistrationTimeoutMs);
+      cell_->startNetworkRegistration(CellTechnology::LTE, _apn, _networkRegistrationTimeoutMs);
   if (result.status != CellReturnStatus::Ok) {
     AG_LOGE(TAG, "Cellular client failed, module cannot register to network");
     clientReady = false;
