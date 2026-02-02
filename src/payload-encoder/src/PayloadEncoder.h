@@ -1,7 +1,14 @@
+/**
+ * AirGradient
+ * https://airgradient.com
+ *
+ * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
+ */
+
 #ifndef PAYLOAD_ENCODER_H
 #define PAYLOAD_ENCODER_H
 
-#include "payload_types.h"
+#include "PayloadTypes.h"
 
 class PayloadEncoder {
 public:

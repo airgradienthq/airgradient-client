@@ -1,4 +1,11 @@
-#include "payload_encoder.h"
+/**
+ * AirGradient
+ * https://airgradient.com
+ *
+ * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
+ */
+
+#include "PayloadEncoder.h"
 #include <string.h>
 
 static inline bool presenceMaskIsZero(const PresenceMask &mask) {
