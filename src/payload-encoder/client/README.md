@@ -5,11 +5,12 @@ C++ encoder for AirGradient binary cellular payload format, optimized for embedd
 ## Features
 
 - ✅ Embedded-friendly (no STL containers, static memory)
-- ✅ Supports all 26 sensor types
-- ✅ Single and dual-channel modes
+- ✅ 64-bit presence mask (8 bytes, little-endian)
+- ✅ Shared presence mask (automatically used when all reading masks match)
+- ✅ Supports explicit two-channel flags for selected sensors
 - ✅ Batch encoding (up to 20 readings)
 - ✅ Little-endian encoding
-- ✅ Comprehensive unit tests (47 tests)
+- ✅ Unit tests
 
 ## Building
 
@@ -31,13 +32,9 @@ After building, run the example program:
 
 This will demonstrate:
 1. Single reading encoding
-2. Dual channel mode
-3. Batch encoding
-4. PM sensors
-5. Multiple sensor types
-6. Negative temperatures
-7. Size calculation
-8. Error handling
+2. Batch encoding (shared mask)
+3. Two-channel PM2.5 flags
+4. Error handling
 
 ## Running Tests
 
@@ -62,7 +59,7 @@ make run_tests
 
 // Initialize encoder
 PayloadEncoder encoder;
-PayloadHeader header = {1, false, false, 5};  // Version 1, single mode, no dedicated temp/hum, 5 min interval
+PayloadHeader header = {5};  // 5 minute interval (version is fixed in firmware)
 encoder.init(header);
 
 // Create a sensor reading
@@ -71,7 +68,7 @@ initSensorReading(&reading);
 
 // Add temperature sensor
 setFlag(&reading, FLAG_TEMP);
-reading.temp[0] = 2500;  // 25.00°C (scaled by 100)
+reading.temp = 2500;  // 25.00°C (scaled by 100)
 
 // Add CO2 sensor
 setFlag(&reading, FLAG_CO2);
@@ -138,20 +135,13 @@ When setting sensor values, apply these scaling factors:
 | Battery voltage | × 100 | 3700 mV → 3700 |
 | O3/NO2 electrodes | × 1000 | 1.234 mV → 1234 |
 
-## Memory Usage
-
-- **SensorReading struct**: ~96 bytes
-- **EncoderContext** (with 20 readings): ~2 KB
-- **Encoded payload** (all sensors, single mode): 68 bytes
-- **Encoded payload** (all sensors, dual mode): 96 bytes
-
 ## Files
 
 - `src/payload_types.h` - Type definitions and constants
 - `src/payload_encoder.h` - Encoder class declaration
 - `src/payload_encoder.cpp` - Encoder implementation
-- `src/main.cpp` - Example usage
-- `test/` - Unit tests (47 tests total)
+- `examples/demo.cpp` - Example usage
+- `test/` - Unit tests
 
 ## License
 

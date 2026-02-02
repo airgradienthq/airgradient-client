@@ -1,0 +1,23 @@
+{
+  "name": "airgradient-payload-decoder",
+  "version": "1.0.0",
+  "description": "AirGradient cellular payload decoder for Node.js/JavaScript",
+  "main": "src/payload_decoder.js",
+  "scripts": {
+    "test": "node src/test_decoder.js",
+    "example": "node src/example_usage.js"
+  },
+  "keywords": [
+    "airgradient",
+    "payload",
+    "decoder",
+    "binary",
+    "coap",
+    "cellular"
+  ],
+  "author": "AirGradient",
+  "license": "MIT",
+  "engines": {
+    "node": ">=12.0.0"
+  }
+}
