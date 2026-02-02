@@ -16,14 +16,18 @@
 #define AIRGRADIENT_COAP_DOMAIN "hw.airgradient.com"
 #define AIRGRADIENT_COAP_IP "91.98.9.143"
 
+#define MAXIMUM_PAYLOAD_BUFFER 100
+
 class AirgradientClient {
 private:
 public:
   AirgradientClient() {};
   virtual ~AirgradientClient() {};
 
-  struct MaxSensorPayload {
+  struct CommonPayload {
     int rco2;
+    float atmp;
+    float rhum;
     int particleCount003;
     int particleCount005;
     int particleCount01;
@@ -36,8 +40,9 @@ public:
     float pm25Sp;
     int tvocRaw;
     int noxRaw;
-    float atmp;
-    float rhum;
+  };
+
+  struct ExtraPayload {
     float vBat;
     float vPanel;
     float o3WorkingElectrode;
@@ -54,10 +59,19 @@ public:
     ONE_OPENAIR_TWO_PMS
   };
 
+  struct PayloadBuffer {
+    CommonPayload common;
+    union {
+      ExtraPayload extra;
+    } ext;
+  };
+
   struct AirgradientPayload {
-    int measureInterval = 0;
+    int measureInterval;
     int signal;
-    void *sensor;
+    PayloadType payloadType;
+    PayloadBuffer payloadBuffer[MAXIMUM_PAYLOAD_BUFFER];
+    int bufferCount;
   };
 
   virtual bool begin(std::string sn, PayloadType pt);

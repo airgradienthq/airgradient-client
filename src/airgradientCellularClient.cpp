@@ -68,10 +68,7 @@ bool AirgradientCellularClient::begin(std::string sn, PayloadType pt) {
     AG_LOGE(TAG, "Cellular client failed, module cannot register to network");
     return false;
   }
-
-  AG_LOGI(TAG, "Cellular client ready, module registered to network. Warming up for 10s...");
   clientReady = true;
-  DELAY_MS(10000);
 
   return true;
 }
@@ -213,20 +210,11 @@ bool AirgradientCellularClient::httpPostMeasures(const AirgradientPayload &paylo
   // Add interval at the first position
   oss << payload.measureInterval;
 
-  if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
-    auto *sensor = static_cast<std::vector<MaxSensorPayload> *>(payload.sensor);
-    for (auto it = sensor->begin(); it != sensor->end(); ++it) {
-      // Seperator between measures cycle
-      oss << ",";
-      // Serialize each measurement
-      _serialize(oss, it->rco2, it->particleCount003, it->pm01, it->pm25, it->pm10, it->tvocRaw,
-                 it->noxRaw, it->atmp, it->rhum, payload.signal, it->vBat, it->vPanel,
-                 it->o3WorkingElectrode, it->o3AuxiliaryElectrode, it->no2WorkingElectrode,
-                 it->no2AuxiliaryElectrode, it->afeTemp, it->particleCount005, it->particleCount01,
-                 it->particleCount02, it->particleCount50, it->particleCount10, it->pm25Sp);
-    }
-  } else {
-    // TODO: Add for OneOpenAir payload
+  for (int i = 0; i < payload.bufferCount; i++) {
+    // Seperator between measures cycle
+    oss << ",";
+    // Serialize each measurement
+    _serialize(oss, payload.signal, payload.payloadBuffer[i]);
   }
 
   // Compile it
@@ -298,26 +286,17 @@ bool AirgradientCellularClient::mqttPublishMeasures(const std::string &payload) 
 }
 
 bool AirgradientCellularClient::mqttPublishMeasures(const AirgradientPayload &payload) {
-
   // Build payload using oss, easier to manage if there's an invalid value that should not included
   std::ostringstream oss;
 
   // Add interval at the first position
   oss << payload.measureInterval;
 
-  if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
-    auto *sensor = static_cast<std::vector<MaxSensorPayload> *>(payload.sensor);
-    for (auto it = sensor->begin(); it != sensor->end(); ++it) {
-      // Seperator between measures cycle
-      oss << ",";
-      // Serialize each measurement
-      _serialize(oss, it->rco2, it->particleCount003, it->pm01, it->pm25, it->pm10, it->tvocRaw,
-                 it->noxRaw, it->atmp, it->rhum, payload.signal, it->vBat, it->vPanel,
-                 it->o3WorkingElectrode, it->o3AuxiliaryElectrode, it->no2WorkingElectrode,
-                 it->no2AuxiliaryElectrode, it->afeTemp);
-    }
-  } else {
-    // TODO: Add for OneOpenAir payload
+  for (int i = 0; i < payload.bufferCount; i++) {
+    // Seperator between measures cycle
+    oss << ",";
+    // Serialize each measurement
+    _serialize(oss, payload.signal, payload.payloadBuffer[i]);
   }
 
   // Compile it
@@ -453,20 +432,11 @@ bool AirgradientCellularClient::coapPostMeasures(const AirgradientPayload &paylo
   // Add interval at the first position
   oss << payload.measureInterval;
 
-  if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
-    auto *sensor = static_cast<std::vector<MaxSensorPayload> *>(payload.sensor);
-    for (auto it = sensor->begin(); it != sensor->end(); ++it) {
-      // Seperator between measures cycle
-      oss << ",";
-      // Serialize each measurement
-      _serialize(oss, it->rco2, it->particleCount003, it->pm01, it->pm25, it->pm10, it->tvocRaw,
-                 it->noxRaw, it->atmp, it->rhum, payload.signal, it->vBat, it->vPanel,
-                 it->o3WorkingElectrode, it->o3AuxiliaryElectrode, it->no2WorkingElectrode,
-                 it->no2AuxiliaryElectrode, it->afeTemp, it->particleCount005, it->particleCount01,
-                 it->particleCount02, it->particleCount50, it->particleCount10, it->pm25Sp);
-    }
-  } else {
-    // TODO: Add for OneOpenAir payload
+  for (int i = 0; i < payload.bufferCount; i++) {
+    // Seperator between measures cycle
+    oss << ",";
+    // Serialize each measurement
+    _serialize(oss, payload.signal, payload.payloadBuffer[i]);
   }
 
   // Compile it
@@ -751,55 +721,51 @@ void AirgradientCellularClient::_generateTokenMessageId(uint8_t token[2], uint16
   *messageId = (uint16_t)((r >> 16) & 0xFFFF);
 }
 
-void AirgradientCellularClient::_serialize(
-    std::ostringstream &oss, int rco2, int particleCount003, float pm01, float pm25, float pm10,
-    int tvoc, int nox, float atmp, float rhum, int signal, float vBat, float vPanel,
-    float o3WorkingElectrode, float o3AuxiliaryElectrode, float no2WorkingElectrode,
-    float no2AuxiliaryElectrode, float afeTemp, int particleCount005, int particleCount01,
-    int particleCount02, int particleCount50, int particleCount10, float pm25Sp) {
+void AirgradientCellularClient::_serialize(std::ostringstream &oss, int signal,
+                                           const PayloadBuffer &payloadBuffer) {
   // CO2
-  if (IS_CO2_VALID(rco2)) {
-    oss << std::round(rco2);
+  if (IS_CO2_VALID(payloadBuffer.common.rco2)) {
+    oss << std::round(payloadBuffer.common.rco2);
   }
   oss << ",";
   // Temperature
-  if (IS_TEMPERATURE_VALID(atmp)) {
-    oss << std::round(atmp * 10);
+  if (IS_TEMPERATURE_VALID(payloadBuffer.common.atmp)) {
+    oss << std::round(payloadBuffer.common.atmp * 10);
   }
   oss << ",";
   // Humidity
-  if (IS_HUMIDITY_VALID(rhum)) {
-    oss << std::round(rhum * 10);
+  if (IS_HUMIDITY_VALID(payloadBuffer.common.rhum)) {
+    oss << std::round(payloadBuffer.common.rhum * 10);
   }
   oss << ",";
   // PM1.0 atmospheric environment
-  if (IS_PM_VALID(pm01)) {
-    oss << std::round(pm01 * 10);
+  if (IS_PM_VALID(payloadBuffer.common.pm01)) {
+    oss << std::round(payloadBuffer.common.pm01 * 10);
   }
   oss << ",";
   // PM2.5 atmospheric environment
-  if (IS_PM_VALID(pm25)) {
-    oss << std::round(pm25 * 10);
+  if (IS_PM_VALID(payloadBuffer.common.pm25)) {
+    oss << std::round(payloadBuffer.common.pm25 * 10);
   }
   oss << ",";
   // PM10 atmospheric environment
-  if (IS_PM_VALID(pm10)) {
-    oss << std::round(pm10 * 10);
+  if (IS_PM_VALID(payloadBuffer.common.pm10)) {
+    oss << std::round(payloadBuffer.common.pm10 * 10);
   }
   oss << ",";
   // TVOC
-  if (IS_TVOC_VALID(tvoc)) {
-    oss << tvoc;
+  if (IS_TVOC_VALID(payloadBuffer.common.tvocRaw)) {
+    oss << payloadBuffer.common.tvocRaw;
   }
   oss << ",";
   // NOx
-  if (IS_NOX_VALID(nox)) {
-    oss << nox;
+  if (IS_NOX_VALID(payloadBuffer.common.noxRaw)) {
+    oss << payloadBuffer.common.noxRaw;
   }
   oss << ",";
   // PM 0.3 particle count
-  if (IS_PM_VALID(particleCount003)) {
-    oss << particleCount003;
+  if (IS_PM_VALID(payloadBuffer.common.particleCount003)) {
+    oss << payloadBuffer.common.particleCount003;
   }
   oss << ",";
   // Radio signal
@@ -809,40 +775,40 @@ void AirgradientCellularClient::_serialize(
   if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
     oss << ",";
     // V Battery
-    if (IS_VOLT_VALID(vBat)) {
-      oss << std::round(vBat * 100);
+    if (IS_VOLT_VALID(payloadBuffer.ext.extra.vBat)) {
+      oss << std::round(payloadBuffer.ext.extra.vBat * 100);
     }
     oss << ",";
     // V Solar Panel
-    if (IS_VOLT_VALID(vPanel)) {
-      oss << std::round(vPanel * 100);
+    if (IS_VOLT_VALID(payloadBuffer.ext.extra.vPanel)) {
+      oss << std::round(payloadBuffer.ext.extra.vPanel * 100);
     }
 
     if (payloadType == MAX_WITH_O3_NO2) {
       oss << ",";
       // Working Electrode O3
-      if (IS_VOLT_VALID(o3WorkingElectrode)) {
-        oss << std::round(o3WorkingElectrode * 1000);
+      if (IS_VOLT_VALID(payloadBuffer.ext.extra.o3WorkingElectrode)) {
+        oss << std::round(payloadBuffer.ext.extra.o3WorkingElectrode * 1000);
       }
       oss << ",";
       // Auxiliary Electrode O3
-      if (IS_VOLT_VALID(o3AuxiliaryElectrode)) {
-        oss << std::round(o3AuxiliaryElectrode * 1000);
+      if (IS_VOLT_VALID(payloadBuffer.ext.extra.o3AuxiliaryElectrode)) {
+        oss << std::round(payloadBuffer.ext.extra.o3AuxiliaryElectrode * 1000);
       }
       oss << ",";
       // Working Electrode NO2
-      if (IS_VOLT_VALID(no2WorkingElectrode)) {
-        oss << std::round(no2WorkingElectrode * 1000);
+      if (IS_VOLT_VALID(payloadBuffer.ext.extra.no2WorkingElectrode)) {
+        oss << std::round(payloadBuffer.ext.extra.no2WorkingElectrode * 1000);
       }
       oss << ",";
       // Auxiliary Electrode NO2
-      if (IS_VOLT_VALID(no2AuxiliaryElectrode)) {
-        oss << std::round(no2AuxiliaryElectrode * 1000);
+      if (IS_VOLT_VALID(payloadBuffer.ext.extra.no2AuxiliaryElectrode)) {
+        oss << std::round(payloadBuffer.ext.extra.no2AuxiliaryElectrode * 1000);
       }
       oss << ",";
       // AFE Temperature
-      if (IS_VOLT_VALID(afeTemp)) {
-        oss << std::round(afeTemp * 10);
+      if (IS_VOLT_VALID(payloadBuffer.ext.extra.afeTemp)) {
+        oss << std::round(payloadBuffer.ext.extra.afeTemp * 10);
       }
     }
   }
@@ -854,33 +820,33 @@ void AirgradientCellularClient::_serialize(
   // Extended measures
   oss << ",";
   // PM 0.5 particle count
-  if (IS_PM_VALID(particleCount005)) {
-    oss << particleCount005;
+  if (IS_PM_VALID(payloadBuffer.common.particleCount005)) {
+    oss << payloadBuffer.common.particleCount005;
   }
   oss << ",";
   // PM 1.0 particle count
-  if (IS_PM_VALID(particleCount01)) {
-    oss << particleCount01;
+  if (IS_PM_VALID(payloadBuffer.common.particleCount01)) {
+    oss << payloadBuffer.common.particleCount01;
   }
   oss << ",";
   // PM 2.5 particle count
-  if (IS_PM_VALID(particleCount02)) {
-    oss << particleCount02;
+  if (IS_PM_VALID(payloadBuffer.common.particleCount02)) {
+    oss << payloadBuffer.common.particleCount02;
   }
   oss << ",";
   // PM 5.0 particle count
-  if (IS_PM_VALID(particleCount50)) {
-    oss << particleCount50;
+  if (IS_PM_VALID(payloadBuffer.common.particleCount50)) {
+    oss << payloadBuffer.common.particleCount50;
   }
   oss << ",";
   // PM 10 particle count
-  if (IS_PM_VALID(particleCount10)) {
-    oss << particleCount10;
+  if (IS_PM_VALID(payloadBuffer.common.particleCount10)) {
+    oss << payloadBuffer.common.particleCount10;
   }
   oss << ",";
   // PM 2.5 standard particle
-  if (IS_PM_VALID(pm25Sp)) {
-    oss << std::round(pm25Sp);
+  if (IS_PM_VALID(payloadBuffer.common.pm25Sp)) {
+    oss << std::round(payloadBuffer.common.pm25Sp);
   }
 }
 

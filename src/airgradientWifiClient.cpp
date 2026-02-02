@@ -5,6 +5,7 @@
  * CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
  */
 
+#include "airgradientClient.h"
 #include "config.h"
 #ifndef ESP8266
 #define ARDUINOJSON_ENABLE_PROGMEM 0
@@ -122,15 +123,14 @@ bool AirgradientWifiClient::httpPostMeasures(const std::string &payload) {
 }
 
 bool AirgradientWifiClient::httpPostMeasures(const AirgradientPayload &payload) {
+  if (payload.bufferCount > 1) {
+    AG_LOGI(TAG, "WiFi payload cannot handle more than 1 buffer");
+    return false;
+  }
+
   JsonDocument jdoc;
   jdoc[JSON_PROP_SIGNAL] = payload.signal;
-
-  if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
-    auto *sensor = static_cast<MaxSensorPayload *>(payload.sensor);
-    _serialize(jdoc, sensor);
-  } else {
-    // TODO: separate serialize for oneopenair
-  }
+  _serialize(jdoc, payload.payloadBuffer[0]);
 
   // Serialize the JSON document to a string
   std::string toSend;
@@ -232,66 +232,76 @@ bool AirgradientWifiClient::_httpPost(const std::string &url, const std::string 
 #endif
 }
 
-void AirgradientWifiClient::_serialize(JsonDocument &doc, const MaxSensorPayload *payload) {
+void AirgradientWifiClient::_serialize(JsonDocument &doc, const PayloadBuffer &payload) {
   // Check and add CO2 value
-  if (IS_CO2_VALID(payload->rco2)) {
-    doc[JSON_PROP_CO2] = payload->rco2;
+  if (IS_CO2_VALID(payload.common.rco2)) {
+    doc[JSON_PROP_CO2] = payload.common.rco2;
   }
 
   // Check and add Particle Count
-  if (IS_PM_VALID(payload->particleCount003)) {
-    doc[JSON_PROP_PM03_COUNT] = payload->particleCount003;
+  if (IS_PM_VALID(payload.common.particleCount003)) {
+    doc[JSON_PROP_PM03_COUNT] = payload.common.particleCount003;
   }
 
   // Check and add PM values
-  if (IS_PM_VALID(payload->pm01)) {
-    doc[JSON_PROP_PM01_AE] = payload->pm01;
+  if (IS_PM_VALID(payload.common.pm01)) {
+    doc[JSON_PROP_PM01_AE] = payload.common.pm01;
   }
-  if (IS_PM_VALID(payload->pm25)) {
-    doc[JSON_PROP_PM25_AE] = payload->pm25;
+  if (IS_PM_VALID(payload.common.pm25)) {
+    doc[JSON_PROP_PM25_AE] = payload.common.pm25;
   }
-  if (IS_PM_VALID(payload->pm10)) {
-    doc[JSON_PROP_PM10_AE] = payload->pm10;
+  if (IS_PM_VALID(payload.common.pm10)) {
+    doc[JSON_PROP_PM10_AE] = payload.common.pm10;
   }
 
   // Check and add TVOC and NOx values
-  // NOTE: currently MAX publish tvoc and nox raw through the index field
-  if (IS_TVOC_VALID(payload->tvocRaw)) {
-    doc[JSON_PROP_TVOC] = payload->tvocRaw;
-  }
-  if (IS_NOX_VALID(payload->noxRaw)) {
-    doc[JSON_PROP_NOX] = payload->noxRaw;
+  if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
+    // NOTE: currently MAX publish tvoc and nox raw through the index field
+    if (IS_TVOC_VALID(payload.common.tvocRaw)) {
+      doc[JSON_PROP_TVOC] = payload.common.tvocRaw;
+    }
+    if (IS_NOX_VALID(payload.common.noxRaw)) {
+      doc[JSON_PROP_NOX] = payload.common.noxRaw;
+    }
+  } else {
+    // TODO: Add index
+    if (IS_TVOC_VALID(payload.common.tvocRaw)) {
+      doc[JSON_PROP_TVOC_RAW] = payload.common.tvocRaw;
+    }
+    if (IS_NOX_VALID(payload.common.noxRaw)) {
+      doc[JSON_PROP_NOX_RAW] = payload.common.noxRaw;
+    }
   }
 
   // Check and add Temperature and Humidity
-  if (IS_TEMPERATURE_VALID(payload->atmp)) {
-    doc[JSON_PROP_TEMP] = payload->atmp;
+  if (IS_TEMPERATURE_VALID(payload.common.atmp)) {
+    doc[JSON_PROP_TEMP] = payload.common.atmp;
   }
-  if (IS_HUMIDITY_VALID(payload->rhum)) {
-    doc[JSON_PROP_RHUM] = payload->rhum;
+  if (IS_HUMIDITY_VALID(payload.common.rhum)) {
+    doc[JSON_PROP_RHUM] = payload.common.rhum;
   }
 
   // Check and add Voltage-related values
-  if (IS_VOLT_VALID(payload->vBat)) {
-    doc[JSON_PROP_VBATT] = payload->vBat;
+  if (IS_VOLT_VALID(payload.ext.extra.vBat)) {
+    doc[JSON_PROP_VBATT] = payload.ext.extra.vBat;
   }
-  if (IS_VOLT_VALID(payload->vPanel)) {
-    doc[JSON_PROP_VPANEL] = payload->vPanel;
+  if (IS_VOLT_VALID(payload.ext.extra.vPanel)) {
+    doc[JSON_PROP_VPANEL] = payload.ext.extra.vPanel;
   }
-  if (IS_VOLT_VALID(payload->o3WorkingElectrode)) {
-    doc[JSON_PROP_O3_WE] = payload->o3WorkingElectrode;
+  if (IS_VOLT_VALID(payload.ext.extra.o3WorkingElectrode)) {
+    doc[JSON_PROP_O3_WE] = payload.ext.extra.o3WorkingElectrode;
   }
-  if (IS_VOLT_VALID(payload->o3AuxiliaryElectrode)) {
-    doc[JSON_PROP_O3_AE] = payload->o3AuxiliaryElectrode;
+  if (IS_VOLT_VALID(payload.ext.extra.o3AuxiliaryElectrode)) {
+    doc[JSON_PROP_O3_AE] = payload.ext.extra.o3AuxiliaryElectrode;
   }
-  if (IS_VOLT_VALID(payload->no2WorkingElectrode)) {
-    doc[JSON_PROP_NO2_WE] = payload->no2WorkingElectrode;
+  if (IS_VOLT_VALID(payload.ext.extra.no2WorkingElectrode)) {
+    doc[JSON_PROP_NO2_WE] = payload.ext.extra.no2WorkingElectrode;
   }
-  if (IS_VOLT_VALID(payload->no2AuxiliaryElectrode)) {
-    doc[JSON_PROP_NO2_AE] = payload->no2AuxiliaryElectrode;
+  if (IS_VOLT_VALID(payload.ext.extra.no2AuxiliaryElectrode)) {
+    doc[JSON_PROP_NO2_AE] = payload.ext.extra.no2AuxiliaryElectrode;
   }
-  if (IS_VOLT_VALID(payload->afeTemp)) {
-    doc[JSON_PROP_AFE_TEMP] = payload->afeTemp;
+  if (IS_VOLT_VALID(payload.ext.extra.afeTemp)) {
+    doc[JSON_PROP_AFE_TEMP] = payload.ext.extra.afeTemp;
   }
 }
 

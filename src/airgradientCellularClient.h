@@ -56,14 +56,7 @@ public:
 
 private:
   std::string _getEndpoint();
-  void _serialize(std::ostringstream &oss, int rco2, int particleCount003, float pm01, float pm25,
-                  float pm10, int tvoc, int nox, float atmp, float rhum, int signal,
-                  float vBat = -1.0f, float vPanel = -1.0f, float o3WorkingElectrode = -1.0f,
-                  float o3AuxiliaryElectrode = -1.0f, float no2WorkingElectrode = -1.0f,
-                  float no2AuxiliaryElectrode = -1.0f, float afeTemp = -1.0f,
-                  int particleCount005 = -1, int particleCount01 = -1, int particleCount02 = -1,
-                  int particleCount50 = -1, int particleCount10 = -1, float pm25Sp = -1.0f);
-
+  void _serialize(std::ostringstream &oss, int signal, const PayloadBuffer &payloadBuffer);
 
   bool _coapConnect();
   void _coapDisconnect(bool keepConnection);
