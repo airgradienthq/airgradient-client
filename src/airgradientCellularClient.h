@@ -51,12 +51,13 @@ public:
   bool mqttPublishMeasures(const std::string &payload);
   bool mqttPublishMeasures(const AirgradientPayload &payload);
   std::string coapFetchConfig(bool keepConnection = false);
-  bool coapPostMeasures(const std::string &payload, bool keepConnection = false);
+  bool coapPostMeasures(const uint8_t* buffer, size_t length, bool keepConnection = false);
   bool coapPostMeasures(const AirgradientPayload &payload, bool keepConnection = false);
 
 private:
   std::string _getEndpoint();
   void _serialize(std::ostringstream &oss, int signal, const PayloadBuffer &payloadBuffer);
+  std::vector<uint8_t> _encodeBinaryPayload(const AirgradientPayload &payload);
 
   bool _coapConnect();
   void _coapDisconnect(bool keepConnection);

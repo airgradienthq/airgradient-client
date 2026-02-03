@@ -91,7 +91,7 @@ public:
   virtual bool mqttPublishMeasures(const std::string &payload);
   virtual bool mqttPublishMeasures(const AirgradientPayload &payload);
   virtual std::string coapFetchConfig(bool keepConnection = false);
-  virtual bool coapPostMeasures(const std::string &payload, bool keepConnection = false);
+  virtual bool coapPostMeasures(const uint8_t* buffer, size_t length, bool keepConnection = false);
   virtual bool coapPostMeasures(const AirgradientPayload &payload, bool keepConnection = false);
 
   // Implemented on base class, not override function

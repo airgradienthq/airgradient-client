@@ -52,7 +52,7 @@ bool AirgradientClient::mqttPublishMeasures(const AirgradientPayload &payload) {
 
 std::string AirgradientClient::coapFetchConfig(bool keepConnection) { return {}; }
 
-bool AirgradientClient::coapPostMeasures(const std::string &payload, bool keepConnection) {
+bool AirgradientClient::coapPostMeasures(const uint8_t* buffer, size_t length, bool keepConnection) {
   return false;
 }
 

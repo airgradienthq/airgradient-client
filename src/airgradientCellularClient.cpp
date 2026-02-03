@@ -11,6 +11,7 @@
 
 #include "airgradientCellularClient.h"
 #include <sstream>
+#include <iomanip>
 #include "cellularModule.h"
 #include "common.h"
 #include "agLogger.h"
@@ -21,6 +22,9 @@
 #include "coap-packet-cpp/src/CoapBuilder.h"
 #include "coap-packet-cpp/src/CoapParser.h"
 #include "coap-packet-cpp/src/CoapTypes.h"
+
+#include "payload-encoder/src/PayloadEncoder.h"
+#include "payload-encoder/src/PayloadTypes.h"
 
 #include "esp_random.h"
 
@@ -367,7 +371,8 @@ std::string AirgradientCellularClient::coapFetchConfig(bool keepConnection) {
   return response;
 }
 
-bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, bool keepConnection) {
+bool AirgradientCellularClient::coapPostMeasures(const uint8_t *buffer, size_t length,
+                                                 bool keepConnection) {
   if (!_coapConnect()) {
     lastPostMeasuresSucceed = false;
     return false;
@@ -376,7 +381,7 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
   // Create token and messageId
   uint8_t token[2];
   uint16_t messageId;
-  std::vector<uint8_t> buffer;
+  std::vector<uint8_t> packetBuffer;
   _generateTokenMessageId(token, &messageId);
 
   // Format coap packet
@@ -386,9 +391,9 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
                  .setMessageId(messageId)
                  .setToken(token, 2)
                  .setUriPath(serialNumber)
-                 .setContentFormat(CoapPacket::CoapContentFormat::TEXT_PLAIN)
-                 .setPayload(payload)
-                 .buildBuffer(buffer);
+                 .setContentFormat(CoapPacket::CoapContentFormat::OCTET_STREAM)
+                 .setPayload(buffer, length)
+                 .buildBuffer(packetBuffer);
   if (err != CoapPacket::CoapError::OK) {
     AG_LOGE(TAG, "CoAP post measures packet build failed %s", CoapPacket::getErrorMessage(err));
     lastPostMeasuresSucceed = false;
@@ -396,10 +401,10 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
   }
 
   AG_LOGI(TAG, "CoAP post measures to %s:%d", coapHostTarget.c_str(), coapPort); // TODO: Add path
-  AG_LOGI(TAG, "Payload: %s", payload.c_str());
+  AG_LOGI(TAG, "Payload size: %d bytes (binary)", length);
 
   CoapPacket::CoapPacket responsePacket;
-  bool success = _coapRequestWithRetry(buffer, messageId, token, 2, &responsePacket);
+  bool success = _coapRequestWithRetry(packetBuffer, messageId, token, 2, &responsePacket);
   if (!success) {
     AG_LOGE(TAG, "CoAP post measures request failed");
     lastPostMeasuresSucceed = false;
@@ -426,23 +431,26 @@ bool AirgradientCellularClient::coapPostMeasures(const std::string &payload, boo
 
 bool AirgradientCellularClient::coapPostMeasures(const AirgradientPayload &payload,
                                                  bool keepConnection) {
-  // Build payload using oss, easier to manage if there's an invalid value that should not included
-  std::ostringstream oss;
+  // Encode to binary format using payload-encoder library
+  auto binaryPayload = _encodeBinaryPayload(payload);
 
-  // Add interval at the first position
-  oss << payload.measureInterval;
-
-  for (int i = 0; i < payload.bufferCount; i++) {
-    // Seperator between measures cycle
-    oss << ",";
-    // Serialize each measurement
-    _serialize(oss, payload.signal, payload.payloadBuffer[i]);
+  if (binaryPayload.empty()) {
+    AG_LOGE(TAG, "Failed to create binary payload");
+    return false;
   }
 
-  // Compile it
-  std::string payloadStr = oss.str();
+  // Log binary payload in hex format
+  std::ostringstream hexStream;
+  hexStream << std::hex << std::uppercase;
+  for (size_t i = 0; i < binaryPayload.size(); i++) {
+    hexStream << std::setfill('0') << std::setw(2) << static_cast<int>(binaryPayload[i]);
+    if (i < binaryPayload.size() - 1) {
+      hexStream << " ";
+    }
+  }
+  AG_LOGI(TAG, "Binary payload (%d bytes): %s", binaryPayload.size(), hexStream.str().c_str());
 
-  return coapPostMeasures(payloadStr, keepConnection);
+  return coapPostMeasures(binaryPayload.data(), binaryPayload.size(), keepConnection);
 }
 
 bool AirgradientCellularClient::_coapConnect() {
@@ -848,6 +856,159 @@ void AirgradientCellularClient::_serialize(std::ostringstream &oss, int signal,
   if (IS_PM_VALID(payloadBuffer.common.pm25Sp)) {
     oss << std::round(payloadBuffer.common.pm25Sp);
   }
+}
+
+std::vector<uint8_t>
+AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payload) {
+  PayloadEncoder encoder;
+  PayloadHeader header = {static_cast<uint8_t>(payload.measureInterval / 60)};
+  encoder.init(header);
+
+  // Convert each PayloadBuffer to SensorReading and add to encoder
+  for (int i = 0; i < payload.bufferCount; i++) {
+    SensorReading reading;
+    initSensorReading(&reading);
+
+    const PayloadBuffer &buf = payload.payloadBuffer[i];
+
+    // Common sensors
+    if (IS_CO2_VALID(buf.common.rco2)) {
+      setFlag(&reading, FLAG_CO2);
+      reading.co2 = static_cast<uint16_t>(buf.common.rco2);
+    }
+
+    if (IS_TEMPERATURE_VALID(buf.common.atmp)) {
+      setFlag(&reading, FLAG_TEMP);
+      reading.temp = static_cast<int16_t>(std::round(buf.common.atmp * 100));
+    }
+
+    if (IS_HUMIDITY_VALID(buf.common.rhum)) {
+      setFlag(&reading, FLAG_HUM);
+      reading.hum = static_cast<uint16_t>(std::round(buf.common.rhum * 100));
+    }
+
+    if (IS_PM_VALID(buf.common.pm01)) {
+      setFlag(&reading, FLAG_PM_01);
+      reading.pm_01 = static_cast<uint16_t>(std::round(buf.common.pm01 * 10));
+    }
+
+    if (IS_PM_VALID(buf.common.pm25)) {
+      setFlag(&reading, FLAG_PM_25_CH1);
+      reading.pm_25[0] = static_cast<uint16_t>(std::round(buf.common.pm25 * 10));
+    }
+
+    if (IS_PM_VALID(buf.common.pm10)) {
+      setFlag(&reading, FLAG_PM_10);
+      reading.pm_10 = static_cast<uint16_t>(std::round(buf.common.pm10 * 10));
+    }
+
+    if (IS_TVOC_VALID(buf.common.tvocRaw)) {
+      setFlag(&reading, FLAG_TVOC_RAW);
+      reading.tvoc_raw = static_cast<uint16_t>(buf.common.tvocRaw);
+    }
+
+    if (IS_NOX_VALID(buf.common.noxRaw)) {
+      setFlag(&reading, FLAG_NOX_RAW);
+      reading.nox_raw = static_cast<uint16_t>(buf.common.noxRaw);
+    }
+
+    if (IS_PM_VALID(buf.common.particleCount003)) {
+      setFlag(&reading, FLAG_PM_03_PC_CH1);
+      reading.pm_03_pc[0] = static_cast<uint16_t>(buf.common.particleCount003);
+    }
+
+    if (IS_PM_VALID(buf.common.particleCount005)) {
+      setFlag(&reading, FLAG_PM_05_PC);
+      reading.pm_05_pc = static_cast<uint16_t>(buf.common.particleCount005);
+    }
+
+    if (IS_PM_VALID(buf.common.particleCount01)) {
+      setFlag(&reading, FLAG_PM_01_PC);
+      reading.pm_01_pc = static_cast<uint16_t>(buf.common.particleCount01);
+    }
+
+    if (IS_PM_VALID(buf.common.particleCount02)) {
+      setFlag(&reading, FLAG_PM_25_PC);
+      reading.pm_25_pc = static_cast<uint16_t>(buf.common.particleCount02);
+    }
+
+    if (IS_PM_VALID(buf.common.particleCount50)) {
+      setFlag(&reading, FLAG_PM_5_PC);
+      reading.pm_5_pc = static_cast<uint16_t>(buf.common.particleCount50);
+    }
+
+    if (IS_PM_VALID(buf.common.particleCount10)) {
+      setFlag(&reading, FLAG_PM_10_PC);
+      reading.pm_10_pc = static_cast<uint16_t>(buf.common.particleCount10);
+    }
+
+    if (IS_PM_VALID(buf.common.pm25Sp)) {
+      setFlag(&reading, FLAG_PM_25_SP_CH1);
+      reading.pm_25_sp[0] = static_cast<uint16_t>(std::round(buf.common.pm25Sp * 10));
+    }
+
+    // Signal strength
+    setFlag(&reading, FLAG_SIGNAL);
+    reading.signal = static_cast<int8_t>(payload.signal);
+
+    // Extended payload for MAX models
+    if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
+      if (IS_VOLT_VALID(buf.ext.extra.vBat)) {
+        setFlag(&reading, FLAG_VBAT);
+        reading.vbat = static_cast<uint16_t>(std::round(buf.ext.extra.vBat * 100));
+      }
+
+      if (IS_VOLT_VALID(buf.ext.extra.vPanel)) {
+        setFlag(&reading, FLAG_VPANEL);
+        reading.vpanel = static_cast<uint16_t>(std::round(buf.ext.extra.vPanel * 100));
+      }
+
+      if (payloadType == MAX_WITH_O3_NO2) {
+        if (IS_VOLT_VALID(buf.ext.extra.o3WorkingElectrode)) {
+          setFlag(&reading, FLAG_O3_WE);
+          reading.o3_we =
+              static_cast<uint32_t>(std::round(buf.ext.extra.o3WorkingElectrode * 1000));
+        }
+
+        if (IS_VOLT_VALID(buf.ext.extra.o3AuxiliaryElectrode)) {
+          setFlag(&reading, FLAG_O3_AE);
+          reading.o3_ae =
+              static_cast<uint32_t>(std::round(buf.ext.extra.o3AuxiliaryElectrode * 1000));
+        }
+
+        if (IS_VOLT_VALID(buf.ext.extra.no2WorkingElectrode)) {
+          setFlag(&reading, FLAG_NO2_WE);
+          reading.no2_we =
+              static_cast<uint32_t>(std::round(buf.ext.extra.no2WorkingElectrode * 1000));
+        }
+
+        if (IS_VOLT_VALID(buf.ext.extra.no2AuxiliaryElectrode)) {
+          setFlag(&reading, FLAG_NO2_AE);
+          reading.no2_ae =
+              static_cast<uint32_t>(std::round(buf.ext.extra.no2AuxiliaryElectrode * 1000));
+        }
+
+        if (IS_VOLT_VALID(buf.ext.extra.afeTemp)) {
+          setFlag(&reading, FLAG_AFE_TEMP);
+          reading.afe_temp = static_cast<uint16_t>(std::round(buf.ext.extra.afeTemp * 10));
+        }
+      }
+    }
+
+    encoder.addReading(reading);
+  }
+
+  // Encode to buffer
+  uint8_t buffer[1024];
+  int32_t size = encoder.encode(buffer, sizeof(buffer));
+
+  if (size < 0) {
+    AG_LOGE(TAG, "Failed to encode binary payload");
+    return {};
+  }
+
+  // Return as vector
+  return std::vector<uint8_t>(buffer, buffer + size);
 }
 
 std::string AirgradientCellularClient::_getEndpoint() {
