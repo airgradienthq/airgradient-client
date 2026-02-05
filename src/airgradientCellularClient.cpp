@@ -752,8 +752,19 @@ void AirgradientCellularClient::_serialize(std::ostringstream &oss, int signal,
   }
   oss << ",";
   // PM2.5 atmospheric environment
-  if (IS_PM_VALID(payloadBuffer.common.pm25)) {
-    oss << std::round(payloadBuffer.common.pm25 * 10);
+  {
+    const bool pm0Ok = IS_PM_VALID(payloadBuffer.common.pm25[0]);
+    const bool pm1Ok = IS_PM_VALID(payloadBuffer.common.pm25[1]);
+    if (pm0Ok && pm1Ok) {
+      const float pm25 = (payloadBuffer.common.pm25[0] + payloadBuffer.common.pm25[1]) / 2.0f;
+      oss << std::round(pm25 * 10);
+    } else if (pm0Ok) {
+      const float pm25 = payloadBuffer.common.pm25[0];
+      oss << std::round(pm25 * 10);
+    } else if (pm1Ok) {
+      const float pm25 = payloadBuffer.common.pm25[1];
+      oss << std::round(pm25 * 10);
+    }
   }
   oss << ",";
   // PM10 atmospheric environment
@@ -772,8 +783,17 @@ void AirgradientCellularClient::_serialize(std::ostringstream &oss, int signal,
   }
   oss << ",";
   // PM 0.3 particle count
-  if (IS_PM_VALID(payloadBuffer.common.particleCount003)) {
-    oss << payloadBuffer.common.particleCount003;
+  {
+    const bool pc0Ok = IS_PM_VALID(payloadBuffer.common.particleCount003[0]);
+    const bool pc1Ok = IS_PM_VALID(payloadBuffer.common.particleCount003[1]);
+    if (pc0Ok && pc1Ok) {
+      const int pc = (payloadBuffer.common.particleCount003[0] + payloadBuffer.common.particleCount003[1]) / 2.0f;
+      oss << pc;
+    } else if (pc0Ok) {
+      oss << payloadBuffer.common.particleCount003[0];
+    } else if (pc1Ok) {
+      oss << payloadBuffer.common.particleCount003[1];
+    }
   }
   oss << ",";
   // Radio signal
@@ -853,8 +873,17 @@ void AirgradientCellularClient::_serialize(std::ostringstream &oss, int signal,
   }
   oss << ",";
   // PM 2.5 standard particle
-  if (IS_PM_VALID(payloadBuffer.common.pm25Sp)) {
-    oss << std::round(payloadBuffer.common.pm25Sp);
+  {
+    const bool sp0Ok = IS_PM_VALID(payloadBuffer.common.pm25Sp[0]);
+    const bool sp1Ok = IS_PM_VALID(payloadBuffer.common.pm25Sp[1]);
+    if (sp0Ok && sp1Ok) {
+      const float pm25Sp = (payloadBuffer.common.pm25Sp[0] + payloadBuffer.common.pm25Sp[1]) / 2.0f;
+      oss << std::round(pm25Sp);
+    } else if (sp0Ok) {
+      oss << std::round(payloadBuffer.common.pm25Sp[0]);
+    } else if (sp1Ok) {
+      oss << std::round(payloadBuffer.common.pm25Sp[1]);
+    }
   }
 }
 
@@ -892,9 +921,14 @@ AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payloa
       reading.pm_01 = static_cast<uint16_t>(std::round(buf.common.pm01 * 10));
     }
 
-    if (IS_PM_VALID(buf.common.pm25)) {
+    if (IS_PM_VALID(buf.common.pm25[0])) {
       setFlag(&reading, FLAG_PM_25_CH1);
-      reading.pm_25[0] = static_cast<uint16_t>(std::round(buf.common.pm25 * 10));
+      reading.pm_25[0] = static_cast<uint16_t>(std::round(buf.common.pm25[0] * 10));
+    }
+
+    if (IS_PM_VALID(buf.common.pm25[1])) {
+      setFlag(&reading, FLAG_PM_25_CH2);
+      reading.pm_25[1] = static_cast<uint16_t>(std::round(buf.common.pm25[1] * 10));
     }
 
     if (IS_PM_VALID(buf.common.pm10)) {
@@ -912,9 +946,14 @@ AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payloa
       reading.nox_raw = static_cast<uint16_t>(buf.common.noxRaw);
     }
 
-    if (IS_PM_VALID(buf.common.particleCount003)) {
+    if (IS_PM_VALID(buf.common.particleCount003[0])) {
       setFlag(&reading, FLAG_PM_03_PC_CH1);
-      reading.pm_03_pc[0] = static_cast<uint16_t>(buf.common.particleCount003);
+      reading.pm_03_pc[0] = static_cast<uint16_t>(buf.common.particleCount003[0]);
+    }
+
+    if (IS_PM_VALID(buf.common.particleCount003[1])) {
+      setFlag(&reading, FLAG_PM_03_PC_CH2);
+      reading.pm_03_pc[1] = static_cast<uint16_t>(buf.common.particleCount003[1]);
     }
 
     if (IS_PM_VALID(buf.common.particleCount005)) {
@@ -942,9 +981,14 @@ AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payloa
       reading.pm_10_pc = static_cast<uint16_t>(buf.common.particleCount10);
     }
 
-    if (IS_PM_VALID(buf.common.pm25Sp)) {
+    if (IS_PM_VALID(buf.common.pm25Sp[0])) {
       setFlag(&reading, FLAG_PM_25_SP_CH1);
-      reading.pm_25_sp[0] = static_cast<uint16_t>(std::round(buf.common.pm25Sp * 10));
+      reading.pm_25_sp[0] = static_cast<uint16_t>(std::round(buf.common.pm25Sp[0] * 10));
+    }
+
+    if (IS_PM_VALID(buf.common.pm25Sp[1])) {
+      setFlag(&reading, FLAG_PM_25_SP_CH2);
+      reading.pm_25_sp[1] = static_cast<uint16_t>(std::round(buf.common.pm25Sp[1] * 10));
     }
 
     // Signal strength
@@ -997,6 +1041,8 @@ AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payloa
 
     encoder.addReading(reading);
   }
+
+  // TODO: Need to consider limit of CoAP packet size which is 1024
 
   // Encode to buffer
   uint8_t buffer[1024];

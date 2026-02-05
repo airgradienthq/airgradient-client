@@ -239,16 +239,33 @@ void AirgradientWifiClient::_serialize(JsonDocument &doc, const PayloadBuffer &p
   }
 
   // Check and add Particle Count
-  if (IS_PM_VALID(payload.common.particleCount003)) {
-    doc[JSON_PROP_PM03_COUNT] = payload.common.particleCount003;
+  {
+    const bool pc0Ok = IS_PM_VALID(payload.common.particleCount003[0]);
+    const bool pc1Ok = IS_PM_VALID(payload.common.particleCount003[1]);
+    if (pc0Ok && pc1Ok) {
+      doc[JSON_PROP_PM03_COUNT] =
+          (payload.common.particleCount003[0] + payload.common.particleCount003[1]) / 2;
+    } else if (pc0Ok) {
+      doc[JSON_PROP_PM03_COUNT] = payload.common.particleCount003[0];
+    } else if (pc1Ok) {
+      doc[JSON_PROP_PM03_COUNT] = payload.common.particleCount003[1];
+    }
   }
 
   // Check and add PM values
   if (IS_PM_VALID(payload.common.pm01)) {
     doc[JSON_PROP_PM01_AE] = payload.common.pm01;
   }
-  if (IS_PM_VALID(payload.common.pm25)) {
-    doc[JSON_PROP_PM25_AE] = payload.common.pm25;
+  {
+    const bool pm0Ok = IS_PM_VALID(payload.common.pm25[0]);
+    const bool pm1Ok = IS_PM_VALID(payload.common.pm25[1]);
+    if (pm0Ok && pm1Ok) {
+      doc[JSON_PROP_PM25_AE] = (payload.common.pm25[0] + payload.common.pm25[1]) / 2.0f;
+    } else if (pm0Ok) {
+      doc[JSON_PROP_PM25_AE] = payload.common.pm25[0];
+    } else if (pm1Ok) {
+      doc[JSON_PROP_PM25_AE] = payload.common.pm25[1];
+    }
   }
   if (IS_PM_VALID(payload.common.pm10)) {
     doc[JSON_PROP_PM10_AE] = payload.common.pm10;
