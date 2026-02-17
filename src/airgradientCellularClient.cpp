@@ -12,6 +12,7 @@
 #include "airgradientCellularClient.h"
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 #include "cellularModule.h"
 #include "common.h"
 #include "agLogger.h"
@@ -378,63 +379,22 @@ bool AirgradientCellularClient::coapPostMeasures(const uint8_t *buffer, size_t l
     return false;
   }
 
-  // Create token and messageId
-  uint8_t token[2];
-  uint16_t messageId;
-  std::vector<uint8_t> packetBuffer;
-  _generateTokenMessageId(token, &messageId);
-
-  // Format coap packet
-  CoapPacket::CoapBuilder builder;
-  auto err = builder.setType(CoapPacket::CoapType::CON)
-                 .setCode(CoapPacket::CoapCode::POST)
-                 .setMessageId(messageId)
-                 .setToken(token, 2)
-                 .setUriPath(serialNumber)
-                 .setContentFormat(CoapPacket::CoapContentFormat::OCTET_STREAM)
-                 .setPayload(buffer, length)
-                 .buildBuffer(packetBuffer);
-  if (err != CoapPacket::CoapError::OK) {
-    AG_LOGE(TAG, "CoAP post measures packet build failed %s", CoapPacket::getErrorMessage(err));
-    lastPostMeasuresSucceed = false;
-    return false;
-  }
-
   AG_LOGI(TAG, "CoAP post measures to %s:%d", coapHostTarget.c_str(), coapPort); // TODO: Add path
   AG_LOGI(TAG, "Payload size: %d bytes (binary)", length);
 
   CoapPacket::CoapPacket responsePacket;
-  bool success = _coapRequestWithRetry(packetBuffer, messageId, token, 2, &responsePacket);
-  if (!success) {
-    AG_LOGE(TAG, "CoAP post measures request failed");
-    lastPostMeasuresSucceed = false;
-    return false;
-  }
-
-  // Check request response code
-  uint8_t codeClass = CoapPacket::getCodeClass(responsePacket.code);
-  uint8_t codeDetail = CoapPacket::getCodeDetail(responsePacket.code);
-  if (codeClass != 2) {
-    AG_LOGE(TAG, "CoAP post measures response failed (%d.%02d)", codeClass, codeDetail);
-    lastPostMeasuresSucceed = false;
-    return false;
-  }
-
-  AG_LOGI(TAG, "CoAP post measures response success (%d.%02d)", codeClass, codeDetail);
-  lastPostMeasuresSucceed = true;
-
-  // Handling disconnection decision
+  const bool success = _coapPost(buffer, length, &responsePacket);
+  lastPostMeasuresSucceed = success;
   _coapDisconnect(keepConnection);
-
-  return true;
+  return success;
 }
 
 bool AirgradientCellularClient::coapPostMeasures(const AirgradientPayload &payload,
                                                  bool keepConnection) {
-  // Encode to binary format using payload-encoder library
-  auto binaryPayload = _encodeBinaryPayload(payload);
+  static uint8_t binaryPayload[MAX_PAYLOAD_SIZE];
+  size_t binaryPayloadLen = 0;
 
-  if (binaryPayload.empty()) {
+  if (!_encodeBinaryPayload(payload, binaryPayload, sizeof(binaryPayload), &binaryPayloadLen)) {
     AG_LOGE(TAG, "Failed to create binary payload");
     return false;
   }
@@ -442,15 +402,138 @@ bool AirgradientCellularClient::coapPostMeasures(const AirgradientPayload &paylo
   // Log binary payload in hex format
   std::ostringstream hexStream;
   hexStream << std::hex << std::uppercase;
-  for (size_t i = 0; i < binaryPayload.size(); i++) {
+  for (size_t i = 0; i < binaryPayloadLen; i++) {
     hexStream << std::setfill('0') << std::setw(2) << static_cast<int>(binaryPayload[i]);
-    if (i < binaryPayload.size() - 1) {
+    if (i < binaryPayloadLen - 1) {
       hexStream << " ";
     }
   }
-  AG_LOGI(TAG, "Binary payload (%d bytes): %s", binaryPayload.size(), hexStream.str().c_str());
+  AG_LOGI(TAG, "Binary payload (%d bytes): %s", (int)binaryPayloadLen, hexStream.str().c_str());
 
-  return coapPostMeasures(binaryPayload.data(), binaryPayload.size(), keepConnection);
+  return coapPostMeasures(binaryPayload, binaryPayloadLen, keepConnection);
+}
+
+CoapPacket::CoapError AirgradientCellularClient::_buildCoapPostPacket(
+    std::vector<uint8_t> &outPacket, uint16_t messageId, const uint8_t *token, uint8_t tokenLen,
+    const uint8_t *payload, size_t payloadLen, bool useBlock1, uint32_t blockNum, bool more,
+    size_t totalLen, bool includeSize1) {
+  outPacket.clear();
+
+  CoapPacket::CoapBuilder builder;
+  builder.setType(CoapPacket::CoapType::CON)
+      .setCode(CoapPacket::CoapCode::POST)
+      .setMessageId(messageId)
+      .setToken(token, tokenLen)
+      .setUriPath(serialNumber)
+      .setContentFormat(CoapPacket::CoapContentFormat::OCTET_STREAM);
+
+  if (useBlock1) {
+    constexpr uint8_t kBlockSzx = 6; // 1024-byte blocks
+    builder.setBlock1(blockNum, more, kBlockSzx);
+    if (includeSize1) {
+      builder.addOption(CoapPacket::CoapOptionNumber::SIZE1, (uint32_t)totalLen);
+    }
+  }
+
+  builder.setPayload(payload, payloadLen);
+  return builder.buildBuffer(outPacket);
+}
+
+bool AirgradientCellularClient::_coapPost(const uint8_t *payload, size_t payloadLen,
+                                         CoapPacket::CoapPacket *respPacket) {
+  if (payload == nullptr || payloadLen == 0) {
+    AG_LOGE(TAG, "CoAP post invalid payload");
+    return false;
+  }
+
+  if (respPacket == nullptr) {
+    AG_LOGE(TAG, "CoAP post invalid response packet");
+    return false;
+  }
+
+  // Create token and base messageId once for the transfer (Block1 requires stable token).
+  uint8_t token[2];
+  uint16_t baseMessageId;
+  _generateTokenMessageId(token, &baseMessageId);
+
+  std::vector<uint8_t> packetBuffer;
+  constexpr size_t kCoapBlockSize = CoapPacket::MAX_PAYLOAD_SIZE;
+  constexpr uint8_t kBlockSzx = 6; // 2^(6+4) = 1024
+
+  // If payloadLen less then the maximum payload size, then no need to proceed using chunking
+  if (payloadLen <= kCoapBlockSize) {
+    const auto err =
+        _buildCoapPostPacket(packetBuffer, baseMessageId, token, 2, payload, payloadLen, false, 0,
+                             false, payloadLen, false);
+    if (err != CoapPacket::CoapError::OK) {
+      AG_LOGE(TAG, "CoAP post measures packet build failed %s", CoapPacket::getErrorMessage(err));
+      return false;
+    }
+
+    const bool success = _coapRequestWithRetry(packetBuffer, baseMessageId, token, 2, respPacket);
+    if (!success) {
+      AG_LOGE(TAG, "CoAP post measures request failed");
+      return false;
+    }
+
+    const uint8_t codeClass = CoapPacket::getCodeClass(respPacket->code);
+    const uint8_t codeDetail = CoapPacket::getCodeDetail(respPacket->code);
+    if (codeClass != 2) {
+      AG_LOGE(TAG, "CoAP post measures response failed (%d.%02d)", codeClass, codeDetail);
+      return false;
+    }
+
+    AG_LOGI(TAG, "CoAP post measures response success (%d.%02d)", codeClass, codeDetail);
+    return true;
+  }
+
+  AG_LOGI(TAG, "CoAP payload > %d bytes, using Block1 transfer", kCoapBlockSize);
+
+  size_t offset = 0;
+  uint32_t blockNum = 0;
+  while (offset < payloadLen) {
+    const size_t chunkLen = std::min(kCoapBlockSize, payloadLen - offset);
+    const bool more = (offset + chunkLen) < payloadLen;
+    const uint16_t messageId = static_cast<uint16_t>(baseMessageId + blockNum);
+
+    const auto err = _buildCoapPostPacket(packetBuffer, messageId, token, 2,
+                                          payload + offset, chunkLen, true, blockNum, more,
+                                          payloadLen, (blockNum == 0));
+    if (err != CoapPacket::CoapError::OK) {
+      AG_LOGE(TAG, "CoAP Block1 packet build failed (block %d) %s", (int)blockNum,
+              CoapPacket::getErrorMessage(err));
+      return false;
+    }
+
+    AG_LOGI(TAG, "CoAP Block1 send block=%d m=%d szx=%d bytes=%d/%d", (int)blockNum,
+            more ? 1 : 0, kBlockSzx, (int)chunkLen, (int)payloadLen);
+
+    const bool success = _coapRequestWithRetry(packetBuffer, messageId, token, 2, respPacket);
+    if (!success) {
+      AG_LOGE(TAG, "CoAP Block1 request failed (block %d)", (int)blockNum);
+      return false;
+    }
+
+    const uint8_t codeClass = CoapPacket::getCodeClass(respPacket->code);
+    const uint8_t codeDetail = CoapPacket::getCodeDetail(respPacket->code);
+    if (codeClass != 2) {
+      AG_LOGE(TAG, "CoAP Block1 response failed (block %d) (%d.%02d)", (int)blockNum, codeClass,
+              codeDetail);
+      return false;
+    }
+
+    if (more && respPacket->code != CoapPacket::CoapCode::CONTINUE_2_31) {
+      AG_LOGE(TAG, "CoAP Block1 expected 2.31 Continue (block %d) got (%d.%02d)", (int)blockNum,
+              codeClass, codeDetail);
+      return false;
+    }
+
+    offset += chunkLen;
+    blockNum++;
+  }
+
+  AG_LOGI(TAG, "CoAP Block1 transfer completed, blocks=%d", (int)blockNum);
+  return true;
 }
 
 bool AirgradientCellularClient::_coapConnect() {
@@ -887,8 +970,9 @@ void AirgradientCellularClient::_serialize(std::ostringstream &oss, int signal,
   }
 }
 
-std::vector<uint8_t>
-AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payload) {
+bool AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payload,
+                                                     uint8_t *outBuffer, size_t outCap,
+                                                     size_t *outLen) {
   PayloadEncoder encoder;
   PayloadHeader header = {static_cast<uint8_t>(payload.measureInterval / 60)};
   encoder.init(header);
@@ -1042,19 +1126,31 @@ AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payloa
     encoder.addReading(reading);
   }
 
-  // TODO: Need to consider limit of CoAP packet size which is 1024
-
-  // Encode to buffer
-  uint8_t buffer[1024];
-  int32_t size = encoder.encode(buffer, sizeof(buffer));
-
-  if (size < 0) {
-    AG_LOGE(TAG, "Failed to encode binary payload");
-    return {};
+  if (outBuffer == nullptr || outLen == nullptr || outCap == 0) {
+    AG_LOGE(TAG, "Invalid output buffer for encoding");
+    return false;
   }
 
-  // Return as vector
-  return std::vector<uint8_t>(buffer, buffer + size);
+  const uint32_t needed = encoder.calculateTotalSize();
+  if (needed == 0) {
+    AG_LOGE(TAG, "Binary payload encoder produced empty payload");
+    return false;
+  }
+
+  if (needed > outCap) {
+    AG_LOGE(TAG, "Binary payload too large for static buffer (needed=%d cap=%d)", (int)needed,
+            (int)outCap);
+    return false;
+  }
+
+  const int32_t size = encoder.encode(outBuffer, (uint32_t)outCap);
+  if (size < 0) {
+    AG_LOGE(TAG, "Failed to encode binary payload");
+    return false;
+  }
+
+  *outLen = (size_t)size;
+  return true;
 }
 
 std::string AirgradientCellularClient::_getEndpoint() {

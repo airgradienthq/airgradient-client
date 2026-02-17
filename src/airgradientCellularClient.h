@@ -9,6 +9,7 @@
 #define AIRGRADIENT_CELLULAR_CLIENT_H
 
 #include <sstream>
+#include <cstddef>
 #ifndef ESP8266
 
 #include <string>
@@ -17,12 +18,16 @@
 #include "cellularModule.h"
 
 #include "coap-packet-cpp/src/CoapPacket.h"
+#include "coap-packet-cpp/src/CoapError.h"
 
 #define DEFAULT_AIRGRADIENT_APN "iot.1nce.net"
 
 class AirgradientCellularClient : public AirgradientClient {
 private:
   const char *const TAG = "AgCellClient";
+  // Maximum binary measures payload we allow the encoder to produce.
+  // CoAP packets are sent in 1024-byte blocks (Block1) when needed.
+  static constexpr size_t MAX_PAYLOAD_SIZE = 2048;
   std::string _apn = DEFAULT_AIRGRADIENT_APN;
   std::string _iccid = "";
   CellularModule *cell_ = nullptr;
@@ -54,10 +59,22 @@ public:
   bool coapPostMeasures(const uint8_t* buffer, size_t length, bool keepConnection = false);
   bool coapPostMeasures(const AirgradientPayload &payload, bool keepConnection = false);
 
-private:
+ private:
   std::string _getEndpoint();
   void _serialize(std::ostringstream &oss, int signal, const PayloadBuffer &payloadBuffer);
-  std::vector<uint8_t> _encodeBinaryPayload(const AirgradientPayload &payload);
+  bool _encodeBinaryPayload(const AirgradientPayload &payload, uint8_t *outBuffer, size_t outCap,
+                            size_t *outLen);
+
+  CoapPacket::CoapError _buildCoapPostPacket(std::vector<uint8_t> &outPacket,
+                                            uint16_t messageId, const uint8_t *token,
+                                            uint8_t tokenLen, const uint8_t *payload,
+                                            size_t payloadLen, bool useBlock1,
+                                            uint32_t blockNum, bool more, size_t totalLen,
+                                            bool includeSize1);
+
+  // Send CoAP POST measures, using Block1 when payload exceeds 1024 bytes.
+  // Generates token and base messageId internally.
+  bool _coapPost(const uint8_t *payload, size_t payloadLen, CoapPacket::CoapPacket *respPacket);
 
   bool _coapConnect();
   void _coapDisconnect(bool keepConnection);

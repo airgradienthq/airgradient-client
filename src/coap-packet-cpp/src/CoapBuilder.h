@@ -79,6 +79,12 @@ public:
     CoapBuilder& setContentFormat(CoapContentFormat format);
 
     /**
+     * Convenience: Set Block1 option (RFC 7959)
+     * num: block number, more: M bit, szx: block size exponent (0-7), size = 2^(szx+4)
+     */
+    CoapBuilder& setBlock1(uint32_t num, bool more, uint8_t szx);
+
+    /**
      * Set payload from vector
      */
     CoapBuilder& setPayload(const std::vector<uint8_t>& data);

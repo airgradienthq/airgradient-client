@@ -88,6 +88,18 @@ CoapBuilder& CoapBuilder::setContentFormat(CoapContentFormat format) {
     return *this;
 }
 
+CoapBuilder& CoapBuilder::setBlock1(uint32_t num, bool more, uint8_t szx) {
+    if (szx > 7) {
+        lastError_ = CoapError::INVALID_ARGUMENT;
+        return *this;
+    }
+
+    const uint32_t mBit = more ? 1U : 0U;
+    const uint32_t value = (num << 4) | (mBit << 3) | (uint32_t)(szx & 0x07);
+    addOption(CoapOptionNumber::BLOCK1, value);
+    return *this;
+}
+
 CoapBuilder& CoapBuilder::setPayload(const std::vector<uint8_t>& data) {
     packet_.payload = data;
     return *this;
@@ -281,6 +293,11 @@ CoapError CoapBuilder::packOptions(std::vector<uint8_t>& buffer) {
 }
 
 CoapError CoapBuilder::validate() {
+    // Honor any earlier builder error
+    if (lastError_ != CoapError::OK) {
+        return lastError_;
+    }
+
     // Check token length
     if (packet_.token_length > 8) {
         return CoapError::INVALID_TOKEN_LENGTH;
