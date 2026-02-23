@@ -8,8 +8,10 @@
 #ifndef CELLULAR_MODULE_H
 #define CELLULAR_MODULE_H
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 enum class CellReturnStatus {
   Ok = 1, // command is success and return expected value
@@ -33,6 +35,11 @@ public:
     int bodyLen;
   };
 
+  struct UdpPacket {
+    std::vector<uint8_t> buff;
+    int size;
+  };
+
   // URL, Headers opt?, conn timeout, recv timeout,
   // response: CRS, status code, body
 
@@ -49,6 +56,7 @@ public:
   virtual CellReturnStatus isSimReady();
   virtual CellResult<int> retrieveSignal();
   virtual CellResult<std::string> retrieveIPAddr();
+  virtual CellResult<std::string> resolveDNS(const std::string &hostname);
   virtual bool setOperators(const std::string &serialized, uint32_t operatorId);
   virtual std::string getSerializedOperators() const;
   virtual uint32_t getCurrentOperatorId() const;
@@ -69,6 +77,11 @@ public:
   virtual CellReturnStatus mqttDisconnect();
   virtual CellReturnStatus mqttPublish(const std::string &topic, const std::string &payload,
                                        int qos = 1, int retain = 0, int timeoutS = 15);
+
+  virtual CellReturnStatus udpConnect(const std::string &host, int port = 5683);
+  virtual CellReturnStatus udpDisconnect();
+  virtual CellReturnStatus udpSend(const UdpPacket &packet, const std::string &host, uint16_t port);
+  virtual CellResult<UdpPacket> udpReceive(uint32_t timeout);
 
   // Generic functions
 

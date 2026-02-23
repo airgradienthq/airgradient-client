@@ -864,6 +864,228 @@ CellReturnStatus CellularModuleA7672XX::mqttPublish(const std::string &topic,
   return CellReturnStatus::Ok;
 }
 
+CellReturnStatus CellularModuleA7672XX::udpConnect(const std::string &host, int port) {
+  AG_LOGI(TAG, "Establish UDP connection to %s:%d", host.c_str(), port);
+
+  auto status = _startUDP();
+  if (status != CellReturnStatus::Ok) {
+    return status;
+  }
+
+  status = _connectUDP(host, port);
+  if (status != CellReturnStatus::Ok) {
+    return status;
+  }
+
+  at_->sendAT("+CIPRXGET=1");
+  ATCommandHandler::Response resp = at_->waitResponse();
+  if (resp != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "Failed set UDP socket receive mode to manual");
+    return CellReturnStatus::Failed;
+  }
+
+  AG_LOGI(TAG, "Success establish UDP connection");
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::udpDisconnect() {
+  auto status = _disconnectUDP();
+  if (status != CellReturnStatus::Ok) {
+    return status;
+  }
+
+  status = _stopUDP();
+  if (status != CellReturnStatus::Ok) {
+    return status;
+  }
+
+  AG_LOGI(TAG, "Success disconnect UDP connection");
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::udpSend(const CellularModule::UdpPacket &packet,
+                                                const std::string &host, uint16_t port) {
+  // Send via AT+CIPSEND with hex mode
+  char cmd[64];
+  snprintf(cmd, sizeof(cmd), "+CIPSEND=%d,%d,\"%s\",%d", UDP_LINK_ID, packet.size, host.c_str(),
+           port);
+
+  // Serial.printf("[CoAP] Sending %d bytes to %s:%d...\n", bufferSize, host, port);
+
+  at_->sendAT(cmd);
+  auto response = at_->waitResponse(5000, ">", "+CIPERROR:");
+  if (response != ATCommandHandler::ExpArg1) {
+    // TODO: Get the CIPERROR error number and timeout
+    AG_LOGW(TAG, "Error +CIPSEND wait for \">\" response");
+    return CellReturnStatus::Error;
+  }
+
+  // Send the hex data
+  at_->sendRaw((const char *)packet.buff.data(), packet.size);
+  response = at_->waitResponse(5000, "+CIPSEND: 0,"); // until connection link
+  if (response != ATCommandHandler::ExpArg1) {
+    AG_LOGW(TAG, "Error +CIPSEND wait for \"+CIPSEND: 0,\" response");
+    return CellReturnStatus::Error;
+  }
+
+  // Confirm CIPSEND sent length
+  std::string data;
+  at_->waitAndRecvRespLine(data);
+  // Sanity check if value is empty
+  if (data.empty()) {
+    AG_LOGW(TAG, "+CIPSEND result value empty");
+    return CellReturnStatus::Error;
+  }
+  int rsl = 0, cnf = 0;
+  Common::splitByDelimiter(data, &rsl, &cnf);
+  if (rsl != cnf) {
+    ESP_LOGE(TAG, "CIPSEND expected bytes send and confirmation different (rsl:%d;cnf:%d)", rsl,
+             cnf);
+    return CellReturnStatus::Error;
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellResult<CellularModule::UdpPacket> CellularModuleA7672XX::udpReceive(uint32_t timeout) {
+  CellResult<CellularModule::UdpPacket> result;
+  result.status = CellReturnStatus::Error;
+  ATCommandHandler::Response response;
+
+  // Wait for URC notification
+  response = at_->waitResponse(3000, "+CIPRXGET: 1,0");
+  if (response == ATCommandHandler::Timeout) {
+    AG_LOGE(TAG, "Wait +CIPRXGET URC timeout");
+    result.status = CellReturnStatus::Timeout;
+    return result;
+  } else if (response != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "Wait +CIPRXGET URC Error");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  at_->clearBuffer();
+
+  // Get packet length available in buffer CIPRXGET=4 (query available data length)
+  char buf[32];
+  snprintf(buf, sizeof(buf), "+CIPRXGET=4,%d", UDP_LINK_ID);
+  at_->sendAT(buf);
+
+  // Response format: +CIPRXGET: 4,<link_num>,<data_len>
+  memset(buf, 0, 32);
+  snprintf(buf, 32, "+CIPRXGET: 4,%d,", UDP_LINK_ID);
+  response = at_->waitResponse(9000, buf, "+IP ERROR:");
+  if (response != ATCommandHandler::ExpArg1) {
+    // TODO: Check +IP ERROR err_info
+    AG_LOGE(TAG, "Error CIPRXGET=4 to receive UDP packet total length");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  // Get the <data_len>
+  memset(buf, 0, 32);
+  at_->waitAndRecvRespLine(buf, 32);
+  char *end;
+  int udpPacketSize = 0;
+  udpPacketSize = strtol(buf, &end, 10);
+  if (udpPacketSize == 0 || end == buf) {
+    AG_LOGE(TAG, "No available data on the buffer");
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+  AG_LOGI(TAG, "UDP packet size in buffer: %d. Retrieving buffer... ", udpPacketSize);
+
+  // Allocate dynamic buffer to hold the complete UDP packet
+  char *udpPacket = new char[udpPacketSize];
+  memset(udpPacket, 0, udpPacketSize);
+
+  // Retrieve packet from buffer in chunks
+  int offset = 0;
+  int totalReceived = 0;
+  char *chunkBuf = new char[HTTPREAD_CHUNK_SIZE + 1];
+
+  do {
+    // Determine chunk size to request (last chunk might be smaller)
+    int requestSize = std::min(HTTPREAD_CHUNK_SIZE, udpPacketSize - totalReceived);
+
+    memset(buf, 0, 32);
+    snprintf(buf, 32, "+CIPRXGET=2,%d,%d", UDP_LINK_ID, requestSize);
+    at_->sendAT(buf);
+
+    // Response format: +CIPRXGET: 2,<link_num>,<read_len>,<rest_len>
+    memset(buf, 0, 32);
+    snprintf(buf, 32, "+CIPRXGET: 2,%d,", UDP_LINK_ID); // until <link_num>,
+    response = at_->waitResponse(5000, buf);
+    if (response != ATCommandHandler::ExpArg1) {
+      AG_LOGE(TAG, "Failed to retrieve UDP packet chunk from buffer (CIPRXGET:2)");
+      result.status = CellReturnStatus::Error;
+      delete[] udpPacket;
+      delete[] chunkBuf;
+      return result;
+    }
+
+    // Get the <read_len> and <rest_len>
+    std::string tmp;
+    at_->waitAndRecvRespLine(tmp);
+    // Sanity check if value is empty
+    if (tmp.empty()) {
+      AG_LOGW(TAG, "Timeout wait the rest of \"+CIPRXGET:2\" response");
+      result.status = CellReturnStatus::Error;
+      delete[] udpPacket;
+      delete[] chunkBuf;
+      return result;
+    }
+
+    int readLen = 0, restLen = 0;
+    Common::splitByDelimiter(tmp, &readLen, &restLen);
+    AG_LOGD(TAG, "read_len: %d | rest_len: %d", readLen, restLen);
+
+    // Retrieve the actual chunk data
+    memset(chunkBuf, 0, HTTPREAD_CHUNK_SIZE + 1);
+    int receivedActual = at_->retrieveBuffer(chunkBuf, readLen);
+    if (receivedActual != readLen) {
+      AG_LOGE(TAG, "Failed retrieve UDP chunk. Expected: %d, Received: %d", readLen,
+              receivedActual);
+      result.status = CellReturnStatus::Failed;
+      delete[] udpPacket;
+      delete[] chunkBuf;
+      return result;
+    }
+
+    // Copy chunk to result buffer
+    memcpy(udpPacket + offset, chunkBuf, readLen);
+    offset += readLen;
+    totalReceived += readLen;
+
+    AG_LOGV(TAG, "Received UDP chunk: %d bytes, total: %d/%d", readLen, totalReceived,
+            udpPacketSize);
+
+    // Continue until no more data remains
+    if (restLen == 0 || totalReceived >= udpPacketSize) {
+      break;
+    }
+
+  } while (totalReceived < udpPacketSize);
+
+  delete[] chunkBuf;
+
+  // Verify received all expected data
+  if (totalReceived != udpPacketSize) {
+    AG_LOGE(TAG, "Incomplete UDP packet received. Expected: %d, Got: %d", udpPacketSize,
+            totalReceived);
+    result.status = CellReturnStatus::Failed;
+    delete[] udpPacket;
+    return result;
+  }
+
+  result.data.buff.assign(udpPacket, udpPacket + udpPacketSize);
+  result.data.size = udpPacketSize;
+  result.status = CellReturnStatus::Ok;
+
+  delete[] udpPacket;
+  return result;
+}
+
 CellularModuleA7672XX::NetworkRegistrationState CellularModuleA7672XX::_implCheckModuleReady() {
   // Check if module responds to AT commands
   if (at_->testAT() == false) {
@@ -1773,6 +1995,136 @@ CellReturnStatus CellularModuleA7672XX::_httpTerminate() {
   }
 
   return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_startUDP() {
+  at_->sendAT("+NETOPEN");
+  auto response = at_->waitResponse(60000, "+NETOPEN:", "+IP ERROR:", "ERROR");
+  if (response == ATCommandHandler::ExpArg2) {
+    at_->clearBuffer();
+    AG_LOGI(TAG, "+NETOPEN PDP context has been activated successfully");
+    return CellReturnStatus::Ok;
+  } else if (response == ATCommandHandler::ExpArg3) {
+    AG_LOGE(TAG, "+NETOPEN Error start UDP service");
+    return CellReturnStatus::Error;
+  } else if (response == ATCommandHandler::Timeout) {
+    AG_LOGE(TAG, "+NETOPEN Timeout start UDP service");
+    return CellReturnStatus::Timeout;
+  }
+
+  char result[1];
+  at_->waitAndRecvRespLine(result, 1);
+  if (result[0] != '0') {
+    AG_LOGE(TAG, "+NETOPEN Failed to open UDP network with code %c", result[0]);
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_stopUDP() {
+  at_->sendAT("+NETCLOSE");
+  auto response = at_->waitResponse(60000, "+NETCLOSE:");
+  if (response == ATCommandHandler::Timeout) {
+    AG_LOGE(TAG, "+NETCLOSE Timeout stop UDP service");
+    return CellReturnStatus::Timeout;
+  } else if (response == ATCommandHandler::ExpArg2) {
+    AG_LOGE(TAG, "+NETCLOSE Error stop UDP service");
+    return CellReturnStatus::Error;
+  }
+
+  char result[1];
+  at_->waitAndRecvRespLine(result, 1);
+  if (result[0] != '0') {
+    AG_LOGE(TAG, "+NETCLOSE Failed to stop UDP service with code %c", result[0]);
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_connectUDP(const std::string &host, int port) {
+  char cmd[128];
+  snprintf(cmd, sizeof(cmd), "+CIPOPEN=%d,\"UDP\",\"%s\",%d,0", UDP_LINK_ID, host.c_str(), port);
+
+  at_->sendAT(cmd);
+  ATCommandHandler::Response resp = at_->waitResponse(10000);
+  if (resp != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "+CIPOPEN failed to open UDP socket");
+    return CellReturnStatus::Failed;
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellReturnStatus CellularModuleA7672XX::_disconnectUDP() {
+  char cmd[32];
+  snprintf(cmd, sizeof(cmd), "+CIPCLOSE=%d", UDP_LINK_ID);
+
+  at_->sendAT(cmd);
+  ATCommandHandler::Response resp = at_->waitResponse(5000);
+  if (resp != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "+CIPCLOSE Failed to close UDP socket");
+    return CellReturnStatus::Failed;
+  }
+
+  return CellReturnStatus::Ok;
+}
+
+CellResult<std::string> CellularModuleA7672XX::resolveDNS(const std::string &hostname) {
+  CellResult<std::string> result;
+  result.status = CellReturnStatus::Error;
+
+  // Build AT+CDNSGIP command
+  char cmd[128];
+  snprintf(cmd, sizeof(cmd), "+CDNSGIP=\"%s\"", hostname.c_str());
+
+  at_->sendAT(cmd);
+
+  // Wait for response: +CDNSGIP: 1,"hostname","ip_address"
+  ATCommandHandler::Response response = at_->waitResponse(10000, "+CDNSGIP:");
+  if (response != ATCommandHandler::ExpArg1) {
+    AG_LOGE(TAG, "+CDNSGIP timeout or error");
+    result.status = CellReturnStatus::Failed;
+    return result;
+  }
+
+  // Read the response line
+  std::string responseLine;
+  if (at_->waitAndRecvRespLine(responseLine) == -1) {
+    AG_LOGW(TAG, "+CDNSGIP retrieve response timeout");
+    result.status = CellReturnStatus::Timeout;
+    return result;
+  }
+
+  // Parse response: format is "1,\"hostname\",\"ip_address\""
+  // Find the last quoted string (IP address)
+  size_t lastQuoteStart = responseLine.rfind('"');
+  if (lastQuoteStart == std::string::npos || lastQuoteStart == 0) {
+    AG_LOGE(TAG, "+CDNSGIP failed to parse IP address");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  size_t secondLastQuoteStart = responseLine.rfind('"', lastQuoteStart - 1);
+  if (secondLastQuoteStart == std::string::npos) {
+    AG_LOGE(TAG, "+CDNSGIP failed to parse IP address");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  std::string ipAddress =
+      responseLine.substr(secondLastQuoteStart + 1, lastQuoteStart - secondLastQuoteStart - 1);
+
+  if (ipAddress.empty()) {
+    AG_LOGE(TAG, "+CDNSGIP returned empty IP address");
+    result.status = CellReturnStatus::Error;
+    return result;
+  }
+
+  AG_LOGI(TAG, "DNS resolved %s to %s", hostname.c_str(), ipAddress.c_str());
+
+  result.data = ipAddress;
+  result.status = CellReturnStatus::Ok;
+  return result;
 }
 
 int CellularModuleA7672XX::_mapCellTechToMode(CellTechnology ct) {

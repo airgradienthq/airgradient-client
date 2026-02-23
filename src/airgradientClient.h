@@ -13,6 +13,10 @@
 #include <vector>
 
 #define AIRGRADIENT_HTTP_DOMAIN "hw.airgradient.com"
+#define AIRGRADIENT_COAP_DOMAIN "map-data-int.airgradient.com"
+#define AIRGRADIENT_COAP_IP "5.223.43.58"
+
+#define MAXIMUM_PAYLOAD_BUFFER 100
 
 class AirgradientClient {
 private:
@@ -20,22 +24,25 @@ public:
   AirgradientClient() {};
   virtual ~AirgradientClient() {};
 
-  struct MaxSensorPayload {
+  struct CommonPayload {
     int rco2;
-    int particleCount003;
+    float atmp;
+    float rhum;
+    int particleCount003[2];
     int particleCount005;
     int particleCount01;
     int particleCount02;
     int particleCount50;
     int particleCount10;
     float pm01;
-    float pm25;
+    float pm25[2];
     float pm10;
-    float pm25Sp;
+    float pm25Sp[2];
     int tvocRaw;
     int noxRaw;
-    float atmp;
-    float rhum;
+  };
+
+  struct ExtraPayload {
     float vBat;
     float vPanel;
     float o3WorkingElectrode;
@@ -52,10 +59,19 @@ public:
     ONE_OPENAIR_TWO_PMS
   };
 
+  struct PayloadBuffer {
+    CommonPayload common;
+    union {
+      ExtraPayload extra;
+    } ext;
+  };
+
   struct AirgradientPayload {
-    int measureInterval = 0;
+    int measureInterval;
     int signal;
-    void *sensor;
+    PayloadType payloadType;
+    PayloadBuffer payloadBuffer[MAXIMUM_PAYLOAD_BUFFER];
+    int bufferCount;
   };
 
   virtual bool begin(std::string sn, PayloadType pt);
@@ -69,10 +85,14 @@ public:
   virtual bool httpPostMeasures(const AirgradientPayload &payload);
   virtual bool mqttConnect();
   virtual bool mqttConnect(const char *uri);
-  virtual bool mqttConnect(const std::string &host, int port, std::string username = "", std::string password = "");
+  virtual bool mqttConnect(const std::string &host, int port, std::string username = "",
+                           std::string password = "");
   virtual bool mqttDisconnect();
   virtual bool mqttPublishMeasures(const std::string &payload);
   virtual bool mqttPublishMeasures(const AirgradientPayload &payload);
+  virtual std::string coapFetchConfig(bool keepConnection = false);
+  virtual bool coapPostMeasures(const uint8_t* buffer, size_t length, bool keepConnection = false);
+  virtual bool coapPostMeasures(const AirgradientPayload &payload, bool keepConnection = false);
 
   // Implemented on base class, not override function
 
@@ -94,6 +114,8 @@ public:
 protected:
   PayloadType payloadType;
   std::string httpDomain = AIRGRADIENT_HTTP_DOMAIN;
+  std::string coapHostTarget = AIRGRADIENT_COAP_IP;
+  const int coapPort = 5683;
   const char *const mqttDomain = "api.airgradient.com";
   const int mqttPort = 1883;
   const char *const AG_SERVER_ROOT_CA =

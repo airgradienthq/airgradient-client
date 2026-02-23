@@ -81,6 +81,8 @@ public:
    */
   void sendRaw(const char *raw);
 
+  void sendRaw(const char *buf, int size);
+
   /**
    * @brief Wait for AT response with multiple response expectation in the form of argument
    * Call this function after sending AT command and expect a response
