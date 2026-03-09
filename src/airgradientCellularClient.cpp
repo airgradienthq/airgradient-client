@@ -13,6 +13,8 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <memory>
+#include <new>
 #include "cellularModule.h"
 #include "common.h"
 #include "agLogger.h"
@@ -29,6 +31,7 @@
 
 #include "esp_random.h"
 
+
 #define ONE_OPENAIR_POST_MEASURES_ENDPOINT "cts"
 #define OPENAIR_MAX_POST_MEASURES_ENDPOINT "cvn"
 #ifdef ARDUINO
@@ -36,6 +39,47 @@
 #else
 #define POST_MEASURES_ENDPOINT OPENAIR_MAX_POST_MEASURES_ENDPOINT
 #endif
+
+
+static void logBinaryPayloadHexPreview(const char *tag, const std::vector<uint8_t> &payload,
+                                       size_t previewBytes) {
+  if (payload.empty()) {
+    AG_LOGI(tag, "Binary payload (0 bytes)");
+    return;
+  }
+
+  if (previewBytes == 0) {
+    AG_LOGI(tag, "Binary payload (%d bytes)", (int)payload.size());
+    return;
+  }
+
+  std::ostringstream oss;
+  oss << std::hex << std::uppercase;
+
+  const auto appendByte = [&](uint8_t b) {
+    oss << std::setfill('0') << std::setw(2) << static_cast<int>(b);
+  };
+
+  const auto appendRange = [&](size_t from, size_t to) {
+    for (size_t i = from; i < to; i++) {
+      appendByte(payload[i]);
+      if (i + 1 < to) {
+        oss << " ";
+      }
+    }
+  };
+
+  if (payload.size() <= (previewBytes * 2)) {
+    appendRange(0, payload.size());
+  } else {
+    appendRange(0, previewBytes);
+    oss << " ... ";
+    appendRange(payload.size() - previewBytes, payload.size());
+  }
+
+  AG_LOGI(tag, "Binary payload (%d bytes) [first/last %d]: %s", (int)payload.size(),
+          (int)previewBytes, oss.str().c_str());
+}
 
 AirgradientCellularClient::AirgradientCellularClient(CellularModule *cellularModule)
     : cell_(cellularModule) {}
@@ -390,27 +434,17 @@ bool AirgradientCellularClient::coapPostMeasures(const uint8_t *buffer, size_t l
 }
 
 bool AirgradientCellularClient::coapPostMeasures(const AirgradientPayload &payload,
-                                                 bool keepConnection) {
-  static uint8_t binaryPayload[MAX_PAYLOAD_SIZE];
-  size_t binaryPayloadLen = 0;
-
-  if (!_encodeBinaryPayload(payload, binaryPayload, sizeof(binaryPayload), &binaryPayloadLen)) {
+                                                  bool keepConnection) {
+  std::vector<uint8_t> binaryPayload;
+  if (!_encodeBinaryPayload(payload, binaryPayload)) {
     AG_LOGE(TAG, "Failed to create binary payload");
     return false;
   }
 
-  // Log binary payload in hex format
-  std::ostringstream hexStream;
-  hexStream << std::hex << std::uppercase;
-  for (size_t i = 0; i < binaryPayloadLen; i++) {
-    hexStream << std::setfill('0') << std::setw(2) << static_cast<int>(binaryPayload[i]);
-    if (i < binaryPayloadLen - 1) {
-      hexStream << " ";
-    }
-  }
-  AG_LOGI(TAG, "Binary payload (%d bytes): %s", (int)binaryPayloadLen, hexStream.str().c_str());
+  constexpr size_t kPreviewBytes = 10;
+  logBinaryPayloadHexPreview(TAG, binaryPayload, kPreviewBytes);
 
-  return coapPostMeasures(binaryPayload, binaryPayloadLen, keepConnection);
+  return coapPostMeasures(binaryPayload.data(), binaryPayload.size(), keepConnection);
 }
 
 CoapPacket::CoapError AirgradientCellularClient::_buildCoapPostPacket(
@@ -971,11 +1005,17 @@ void AirgradientCellularClient::_serialize(std::ostringstream &oss, int signal,
 }
 
 bool AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &payload,
-                                                     uint8_t *outBuffer, size_t outCap,
-                                                     size_t *outLen) {
-  PayloadEncoder encoder;
+                                                     std::vector<uint8_t> &out) {
+  out.clear();
+
+  std::unique_ptr<PayloadEncoder> encoder(new (std::nothrow) PayloadEncoder());
+  if (!encoder) {
+    AG_LOGE(TAG, "Failed to allocate binary payload encoder");
+    return false;
+  }
+
   PayloadHeader header = {static_cast<uint8_t>(payload.measureInterval / 60)};
-  encoder.init(header);
+  encoder->init(header);
 
   // Convert each PayloadBuffer to SensorReading and add to encoder
   for (int i = 0; i < payload.bufferCount; i++) {
@@ -1123,33 +1163,36 @@ bool AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &p
       }
     }
 
-    encoder.addReading(reading);
+    //NOTE: This should not happen. Prevent before happen
+    if (!encoder->addReading(reading)) {
+      AG_LOGE(TAG, "Binary payload encoder batch full (bufferCount=%d max=%d)", payload.bufferCount,
+              (int)MAX_BATCH_SIZE);
+      return false;
+    }
   }
 
-  if (outBuffer == nullptr || outLen == nullptr || outCap == 0) {
-    AG_LOGE(TAG, "Invalid output buffer for encoding");
-    return false;
-  }
-
-  const uint32_t needed = encoder.calculateTotalSize();
+  const uint32_t needed = encoder->calculateTotalSize();
   if (needed == 0) {
     AG_LOGE(TAG, "Binary payload encoder produced empty payload");
     return false;
   }
 
-  if (needed > outCap) {
-    AG_LOGE(TAG, "Binary payload too large for static buffer (needed=%d cap=%d)", (int)needed,
-            (int)outCap);
+  if (needed > MAX_PAYLOAD_SIZE) {
+    AG_LOGE(TAG, "Binary payload too large (needed=%d cap=%d)", (int)needed, (int)MAX_PAYLOAD_SIZE);
     return false;
   }
 
-  const int32_t size = encoder.encode(outBuffer, (uint32_t)outCap);
+  out.resize(needed);
+
+  const int32_t size = encoder->encode(out.data(), (uint32_t)out.size());
   if (size < 0) {
     AG_LOGE(TAG, "Failed to encode binary payload");
     return false;
   }
 
-  *outLen = (size_t)size;
+  out.resize((size_t)size);
+  AG_LOGI(TAG, "Binary payload encoded %d readings into %d bytes", (int)encoder->getReadingCount(),
+          (int)out.size());
   return true;
 }
 

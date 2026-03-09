@@ -12,7 +12,8 @@
 #include <stdbool.h>
 
 // Maximum number of readings in a batch
-#define MAX_BATCH_SIZE 20
+// Keep in sync with AirgradientClient::MAXIMUM_PAYLOAD_BUFFER.
+#define MAX_BATCH_SIZE 100
 
 // Payload schema version
 #define AG_PAYLOAD_VERSION 0

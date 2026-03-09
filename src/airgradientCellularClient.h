@@ -27,7 +27,7 @@ private:
   const char *const TAG = "AgCellClient";
   // Maximum binary measures payload we allow the encoder to produce.
   // CoAP packets are sent in 1024-byte blocks (Block1) when needed.
-  static constexpr size_t MAX_PAYLOAD_SIZE = 2048;
+  static constexpr size_t MAX_PAYLOAD_SIZE = 8192;
   std::string _apn = DEFAULT_AIRGRADIENT_APN;
   std::string _iccid = "";
   CellularModule *cell_ = nullptr;
@@ -62,8 +62,7 @@ public:
  private:
   std::string _getEndpoint();
   void _serialize(std::ostringstream &oss, int signal, const PayloadBuffer &payloadBuffer);
-  bool _encodeBinaryPayload(const AirgradientPayload &payload, uint8_t *outBuffer, size_t outCap,
-                            size_t *outLen);
+  bool _encodeBinaryPayload(const AirgradientPayload &payload, std::vector<uint8_t> &out);
 
   CoapPacket::CoapError _buildCoapPostPacket(std::vector<uint8_t> &outPacket,
                                             uint16_t messageId, const uint8_t *token,
