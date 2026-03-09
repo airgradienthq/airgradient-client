@@ -1060,9 +1060,19 @@ bool AirgradientCellularClient::_encodeBinaryPayload(const AirgradientPayload &p
       reading.pm_10 = static_cast<uint16_t>(std::round(buf.common.pm10 * 10));
     }
 
+    if (IS_TVOC_VALID(buf.common.tvoc)) {
+      setFlag(&reading, FLAG_TVOC);
+      reading.tvoc = static_cast<uint16_t>(buf.common.tvoc);
+    }
+
     if (IS_TVOC_VALID(buf.common.tvocRaw)) {
       setFlag(&reading, FLAG_TVOC_RAW);
       reading.tvoc_raw = static_cast<uint16_t>(buf.common.tvocRaw);
+    }
+
+    if (IS_TVOC_VALID(buf.common.nox)) {
+      setFlag(&reading, FLAG_NOX);
+      reading.nox = static_cast<uint16_t>(buf.common.nox);
     }
 
     if (IS_NOX_VALID(buf.common.noxRaw)) {

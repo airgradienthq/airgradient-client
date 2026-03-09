@@ -39,7 +39,9 @@ public:
     float pm10;
     float pm25Sp[2];
     int tvocRaw;
+    int tvoc;
     int noxRaw;
+    int nox;
   };
 
   struct ExtraPayload {

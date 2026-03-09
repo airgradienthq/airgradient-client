@@ -272,22 +272,17 @@ void AirgradientWifiClient::_serialize(JsonDocument &doc, const PayloadBuffer &p
   }
 
   // Check and add TVOC and NOx values
-  if (payloadType == MAX_WITH_O3_NO2 || payloadType == MAX_WITHOUT_O3_NO2) {
-    // NOTE: currently MAX publish tvoc and nox raw through the index field
-    if (IS_TVOC_VALID(payload.common.tvocRaw)) {
-      doc[JSON_PROP_TVOC] = payload.common.tvocRaw;
-    }
-    if (IS_NOX_VALID(payload.common.noxRaw)) {
-      doc[JSON_PROP_NOX] = payload.common.noxRaw;
-    }
-  } else {
-    // TODO: Add index
-    if (IS_TVOC_VALID(payload.common.tvocRaw)) {
-      doc[JSON_PROP_TVOC_RAW] = payload.common.tvocRaw;
-    }
-    if (IS_NOX_VALID(payload.common.noxRaw)) {
-      doc[JSON_PROP_NOX_RAW] = payload.common.noxRaw;
-    }
+  if (IS_TVOC_VALID(payload.common.tvoc)) {
+    doc[JSON_PROP_TVOC] = payload.common.tvoc;
+  }
+  if (IS_TVOC_VALID(payload.common.tvocRaw)) {
+    doc[JSON_PROP_TVOC_RAW] = payload.common.tvocRaw;
+  }
+  if (IS_NOX_VALID(payload.common.nox)) {
+    doc[JSON_PROP_NOX] = payload.common.nox;
+  }
+  if (IS_NOX_VALID(payload.common.noxRaw)) {
+    doc[JSON_PROP_NOX_RAW] = payload.common.noxRaw;
   }
 
   // Check and add Temperature and Humidity
