@@ -89,6 +89,10 @@ void AgSerial::print(const char *str) {
   iicSerial_->print(str);
 }
 
+void AgSerial::write(const char *data, int size) {
+  iicSerial_->write(data, size);
+}
+
 uint8_t AgSerial::read() {
   if (_debug) {
     char b = iicSerial_->read();

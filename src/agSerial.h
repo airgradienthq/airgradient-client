@@ -35,6 +35,7 @@ public:
 
   bool available();
   void print(const char *str);
+  void write(const char *data, int size);
   uint8_t read();
 };
 

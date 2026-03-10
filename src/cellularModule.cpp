@@ -31,6 +31,10 @@ CellResult<int> CellularModule::retrieveSignal() { return CellResult<int>(); }
 
 CellResult<std::string> CellularModule::retrieveIPAddr() { return CellResult<std::string>(); }
 
+CellResult<std::string> CellularModule::resolveDNS(const std::string &hostname) {
+  return CellResult<std::string>();
+}
+
 bool CellularModule::setOperators(const std::string &serialized, uint32_t operatorId) {
   return false;
 }
@@ -74,6 +78,21 @@ CellReturnStatus CellularModule::mqttDisconnect() { return CellReturnStatus::Err
 CellReturnStatus CellularModule::mqttPublish(const std::string &topic, const std::string &payload,
                                              int qos, int retain, int timeoutS) {
   return CellReturnStatus::Error;
+}
+
+CellReturnStatus CellularModule::udpConnect(const std::string &host, int port) {
+  return CellReturnStatus::Error;
+}
+
+CellReturnStatus CellularModule::udpDisconnect() { return CellReturnStatus::Error; }
+
+CellReturnStatus CellularModule::udpSend(const UdpPacket &packet, const std::string &host,
+                                         uint16_t port) {
+  return CellReturnStatus::Error;
+}
+
+CellResult<CellularModule::UdpPacket> CellularModule::udpReceive(uint32_t timeout) {
+  return CellResult<UdpPacket>();
 }
 
 int CellularModule::csqToDbm(int csq) {

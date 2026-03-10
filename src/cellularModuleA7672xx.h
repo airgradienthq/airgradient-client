@@ -114,6 +114,12 @@ public:
   CellReturnStatus mqttPublish(const std::string &topic, const std::string &payload, int qos = 1,
                                int retain = 0, int timeoutS = 15);
 
+  CellReturnStatus udpConnect(const std::string &host, int port = 5683);
+  CellReturnStatus udpDisconnect();
+  CellReturnStatus udpSend(const CellularModule::UdpPacket &packet, const std::string &host,
+                           uint16_t port);
+  CellResult<CellularModule::UdpPacket> udpReceive(uint32_t timeout);
+  CellResult<std::string> resolveDNS(const std::string &hostname);
   // Operator serialization/deserialization
   bool setOperators(const std::string &serialized, uint32_t operatorId);
   std::string getSerializedOperators() const;
@@ -123,6 +129,7 @@ private:
   const int DEFAULT_HTTP_CONNECT_TIMEOUT = 120; // seconds
   const int DEFAULT_HTTP_RESPONSE_TIMEOUT = 20; // seconds
   const int HTTPREAD_CHUNK_SIZE = CONFIG_HTTPREAD_CHUNK_SIZE;
+  const int UDP_LINK_ID = 0;
 
   // Network Registration implementation for each state
   NetworkRegistrationState _implCheckModuleReady();
@@ -156,6 +163,10 @@ private:
   CellReturnStatus _httpAction(int httpMethodCode, int connectionTimeout, int responseTimeout,
                                int *oResponseCode, int *oBodyLen);
   CellReturnStatus _httpTerminate();
+  CellReturnStatus _startUDP();
+  CellReturnStatus _stopUDP();
+  CellReturnStatus _connectUDP(const std::string &host, int port);
+  CellReturnStatus _disconnectUDP();
 
   int _mapCellTechToMode(CellTechnology ct);
   std::string _mapCellTechToNetworkRegisCmd(CellTechnology ct);

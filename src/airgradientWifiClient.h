@@ -9,6 +9,7 @@
 #define AIRGRADIENT_WIFI_CLIENT_H
 
 #ifndef ESP8266
+#define ARDUINOJSON_ENABLE_PROGMEM 0
 
 #include <string>
 #include <ArduinoJson.h>
@@ -38,7 +39,7 @@ public:
 private:
   bool _httpGet(const std::string &url, int &responseCode, std::string &responseBody);
   bool _httpPost(const std::string &url, const std::string &payload, int &responseCode);
-  void _serialize(JsonDocument &doc, const MaxSensorPayload *payload);
+  void _serialize(JsonDocument &doc, const PayloadBuffer &payload);
 
 };
 
