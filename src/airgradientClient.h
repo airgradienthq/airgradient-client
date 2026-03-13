@@ -13,7 +13,7 @@
 #include <vector>
 
 #define AIRGRADIENT_HTTP_DOMAIN "hw.airgradient.com"
-#define AIRGRADIENT_COAP_DOMAIN "api.airgradient.com"
+#define AIRGRADIENT_COAP_DOMAIN "coap.airgradient.com"
 #define AIRGRADIENT_COAP_IP "128.140.49.53"
 
 #define MAXIMUM_PAYLOAD_BUFFER 100
