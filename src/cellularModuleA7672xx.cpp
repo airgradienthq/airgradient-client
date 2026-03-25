@@ -395,23 +395,8 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
   }
 
   if (state != NETWORK_READY) {
-    // Increment fail counter for operation-timeout exits that didn't go through OPERATOR_LIST_EXHAUSTED
-    if (!availableOperators_.empty()) {
-      registrationFailCount_++;
-      AG_LOGW(TAG, "Network registration failed! Final state: %d (fail count: %" PRIu32 " of %" PRIu32 ")",
-              state, registrationFailCount_, MAX_REGISTRATION_FAILURES);
-
-      if (registrationFailCount_ >= MAX_REGISTRATION_FAILURES) {
-        AG_LOGW(TAG, "Clearing stale operator list after %" PRIu32 " consecutive failures",
-                registrationFailCount_);
-        availableOperators_.clear();
-        currentOperatorId_ = 0;
-        currentOperatorIndex_ = 0;
-        registrationFailCount_ = 0;
-      }
-    } else {
-      AG_LOGW(TAG, "Network registration failed! Final state: %d", state);
-    }
+    AG_LOGW(TAG, "Network registration failed! Final state: %d (fail count: %" PRIu32 " of %" PRIu32 ")",
+            state, registrationFailCount_, MAX_REGISTRATION_FAILURES);
     return result;
   }
 
