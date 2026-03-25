@@ -31,13 +31,16 @@ CellResult<int> CellularModule::retrieveSignal() { return CellResult<int>(); }
 
 CellResult<std::string> CellularModule::retrieveIPAddr() { return CellResult<std::string>(); }
 
-bool CellularModule::setOperators(const std::string &serialized, uint32_t operatorId) {
+bool CellularModule::setOperators(const std::string &serialized, uint32_t operatorId,
+                                  uint32_t registrationFailCount) {
   return false;
 }
 
 std::string CellularModule::getSerializedOperators() const { return std::string(); }
 
 uint32_t CellularModule::getCurrentOperatorId() const { return 0; }
+
+uint32_t CellularModule::getRegistrationFailCount() const { return 0; }
 
 CellReturnStatus CellularModule::isNetworkRegistered(CellTechnology ct) {
   return CellReturnStatus();

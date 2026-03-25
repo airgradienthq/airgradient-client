@@ -286,9 +286,6 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
   uint32_t manualOperatorStartTime = 0;  // Track time per operator in manual mode (60 sec timeout)
   uint32_t serviceStatusStartTime = 0;   // Track time in CHECK_SERVICE_STATUS (30 sec timeout)
 
-  // Track operator list exhaustion (full iterations through all operators)
-  uint32_t operatorListExhaustedCount = 0;
-  const uint32_t MAX_OPERATOR_LIST_EXHAUSTION = 3;
   const uint32_t SERVICE_STATUS_TIMEOUT = 30000;  // 30 seconds
 
   NetworkRegistrationState state = CHECK_MODULE_READY;
@@ -326,18 +323,19 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
 
     case OPERATOR_LIST_EXHAUSTED: {
       // All operators exhausted, increment exhaustion counter
-      operatorListExhaustedCount++;
+      registrationFailCount_++;
       AG_LOGW(TAG, "Operator list exhausted (attempt %" PRIu32 " of %" PRIu32 ")",
-              operatorListExhaustedCount, MAX_OPERATOR_LIST_EXHAUSTION);
+              registrationFailCount_, MAX_REGISTRATION_FAILURES);
 
-      if (operatorListExhaustedCount >= MAX_OPERATOR_LIST_EXHAUSTION) {
+      if (registrationFailCount_ >= MAX_REGISTRATION_FAILURES) {
         // Reached maximum exhaustion attempts, fail registration
         AG_LOGE(TAG, "Failed after %" PRIu32 " full iterations through operator list",
-                MAX_OPERATOR_LIST_EXHAUSTION);
-        // Clear operator list and saved operator
+                registrationFailCount_);
+        // Clear operator list and saved operator, reset fail counter
         availableOperators_.clear();
         currentOperatorId_ = 0;
         currentOperatorIndex_ = 0;
+        registrationFailCount_ = 0;
         finish = true;
         continue;
       }
@@ -397,9 +395,28 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
   }
 
   if (state != NETWORK_READY) {
-    AG_LOGW(TAG, "Network registration failed! Final state: %d", state);
+    // Increment fail counter for operation-timeout exits that didn't go through OPERATOR_LIST_EXHAUSTED
+    if (!availableOperators_.empty()) {
+      registrationFailCount_++;
+      AG_LOGW(TAG, "Network registration failed! Final state: %d (fail count: %" PRIu32 " of %" PRIu32 ")",
+              state, registrationFailCount_, MAX_REGISTRATION_FAILURES);
+
+      if (registrationFailCount_ >= MAX_REGISTRATION_FAILURES) {
+        AG_LOGW(TAG, "Clearing stale operator list after %" PRIu32 " consecutive failures",
+                registrationFailCount_);
+        availableOperators_.clear();
+        currentOperatorId_ = 0;
+        currentOperatorIndex_ = 0;
+        registrationFailCount_ = 0;
+      }
+    } else {
+      AG_LOGW(TAG, "Network registration failed! Final state: %d", state);
+    }
     return result;
   }
+
+  // Registration succeeded, reset fail counter
+  registrationFailCount_ = 0;
 
   AG_LOGI(TAG, "Warming up for %" PRIu32 "ms...", _warmUpTimeMs);
   DELAY_MS(_warmUpTimeMs);
@@ -1830,9 +1847,12 @@ int CellularModuleA7672XX::_calculateResponseTimeout(int connectionTimeout, int 
   return waitActionTimeout;
 }
 
-bool CellularModuleA7672XX::setOperators(const std::string &serialized, uint32_t operatorId) {
-  AG_LOGI(TAG, "Setting operators from serialized string: %s, current operatorId: %" PRIu32,
-          serialized.c_str(), operatorId);
+bool CellularModuleA7672XX::setOperators(const std::string &serialized, uint32_t operatorId,
+                                         uint32_t registrationFailCount) {
+  AG_LOGI(TAG, "Setting operators from serialized string: %s, current operatorId: %" PRIu32
+          ", failCount: %" PRIu32,
+          serialized.c_str(), operatorId, registrationFailCount);
+  registrationFailCount_ = registrationFailCount;
 
   // Clear existing operators
   availableOperators_.clear();
@@ -1929,6 +1949,10 @@ std::string CellularModuleA7672XX::getSerializedOperators() const {
 
 uint32_t CellularModuleA7672XX::getCurrentOperatorId() const {
   return currentOperatorId_;
+}
+
+uint32_t CellularModuleA7672XX::getRegistrationFailCount() const {
+  return registrationFailCount_;
 }
 
 #endif // ESP8266
