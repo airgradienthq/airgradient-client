@@ -926,7 +926,6 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
       AG_LOGW(TAG,
               "This operator %" PRIu32 " has really low signal %d (csq), moving on..",
               currentOperatorId_, signal);
-      currentOperatorId_ = 0; // Clear saved operator
       currentOperatorIndex_++;
       REGIS_RETRY_DELAY();
       return CONFIGURE_MANUAL_NETWORK;
@@ -961,7 +960,6 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
     // Still denied/emergency after confirmation period
     if (stat == 3 || stat == 11) {
       AG_LOGW(TAG, "Registration still denied/emergency (status=%d) after 10s, trying next operator", stat);
-      currentOperatorId_ = 0;  // Clear saved operator
       currentOperatorIndex_++;
       return CONFIGURE_MANUAL_NETWORK;
     }
@@ -970,7 +968,6 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
   // Not registered, check timeout
   if ((MILLIS() - manualOperatorStartTime) > TIMEOUT_WAIT_REGISTERED) {
     AG_LOGW(TAG, "Not registered with current operator after 60 seconds, trying next");
-    currentOperatorId_ = 0;  // Clear saved operator
     currentOperatorIndex_++;
     return CONFIGURE_MANUAL_NETWORK;
   }
@@ -1065,6 +1062,7 @@ CellularModuleA7672XX::_implConfigureManualNetwork() {
   }
 
   OperatorInfo opInfo = availableOperators_[currentOperatorIndex_];
+  currentOperatorId_ = opInfo.operatorId;  // Track last attempted operator for persistence
   AG_LOGI(TAG, "Configuring manual operator: %" PRIu32 " with AcT: %d (index %zu of %zu)",
           opInfo.operatorId, opInfo.accessTech, currentOperatorIndex_ + 1, availableOperators_.size());
   DELAY_MS(5000);
