@@ -1,0 +1,137 @@
+---
+title: Cellular Network Registration State Machine
+---
+stateDiagram-v2
+    direction TB
+
+    [*] --> CHECK_MODULE_READY
+
+    %% ─── CHECK_MODULE_READY ───
+    state CHECK_MODULE_READY {
+        direction LR
+        cmr1: Test AT
+        cmr2: Check SIM ready
+        cmr1 --> cmr2
+    }
+    CHECK_MODULE_READY --> PREPARE_MODULE : AT ok, SIM ready
+    CHECK_MODULE_READY --> FAILED : AT or SIM not ready
+
+    %% ─── PREPARE_MODULE ───
+    state PREPARE_MODULE {
+        direction LR
+        pm1: Disable URC
+        pm2: Apply cell technology
+        pm3: Apply APN
+        pm4: Check operator list
+        pm1 --> pm2
+        pm2 --> pm3
+        pm3 --> pm4
+    }
+    PREPARE_MODULE --> SCAN_OPERATOR : No cached operator list
+    PREPARE_MODULE --> CONFIGURE_MANUAL_NETWORK : Has cached operator list
+    PREPARE_MODULE --> CHECK_MODULE_READY : Timeout
+
+    %% ─── SCAN_OPERATOR ───
+    state SCAN_OPERATOR {
+        direction LR
+        so1: AT+COPS=?
+        so2: Parse operator list
+        so1 --> so2
+    }
+    SCAN_OPERATOR --> CONFIGURE_MANUAL_NETWORK : Operators found
+    SCAN_OPERATOR --> CHECK_MODULE_READY : Scan failed / timeout
+
+    %% ─── CONFIGURE_MANUAL_NETWORK ───
+    state CONFIGURE_MANUAL_NETWORK {
+        direction TB
+        mn1: Find saved operator (by currentOperatorId_)
+        mn2: Check index >= list size?
+        mn3: Select operator via AT+COPS
+        mn1 --> mn2
+        mn2 --> mn3 : Has operators left
+    }
+    CONFIGURE_MANUAL_NETWORK --> OPERATOR_LIST_EXHAUSTED : All operators tried (index >= size)
+    CONFIGURE_MANUAL_NETWORK --> CHECK_NETWORK_REGISTRATION : Operator selected OK
+    CONFIGURE_MANUAL_NETWORK --> CONFIGURE_MANUAL_NETWORK : Selection error, try next
+    CONFIGURE_MANUAL_NETWORK --> CHECK_MODULE_READY : Selection timeout, try next
+
+    %% ─── CHECK_NETWORK_REGISTRATION ───
+    state CHECK_NETWORK_REGISTRATION {
+        direction TB
+        nr1: Query registration status
+        nr2: Query signal strength
+        nr1 --> nr2
+    }
+    CHECK_NETWORK_REGISTRATION --> CHECK_SERVICE_STATUS : Registered (stat=1,5) with good signal
+    CHECK_NETWORK_REGISTRATION --> CONFIGURE_MANUAL_NETWORK : Low signal (< 10 csq), try next
+    CHECK_NETWORK_REGISTRATION --> CONFIGURE_MANUAL_NETWORK : Denied/emergency (stat=3,11) after 10s confirm
+    CHECK_NETWORK_REGISTRATION --> CONFIGURE_MANUAL_NETWORK : Not registered after 60s, try next
+    CHECK_NETWORK_REGISTRATION --> CHECK_NETWORK_REGISTRATION : Still searching, retry (3s)
+    CHECK_NETWORK_REGISTRATION --> CHECK_MODULE_READY : Status check timeout
+
+    %% ─── CHECK_SERVICE_STATUS ───
+    state CHECK_SERVICE_STATUS {
+        direction TB
+        ss1: Check service available (CNSMOD)
+        ss2: Activate PDP context
+        ss3: Ensure packet domain attached
+        ss1 --> ss2
+        ss2 --> ss3
+    }
+    CHECK_SERVICE_STATUS --> NETWORK_READY : Service ready, PDP active
+    CHECK_SERVICE_STATUS --> CHECK_SERVICE_STATUS : Service/PDP not ready, retry
+    CHECK_SERVICE_STATUS --> CHECK_NETWORK_REGISTRATION : Service check timeout (30s)
+    CHECK_SERVICE_STATUS --> CHECK_MODULE_READY : AT timeout
+
+    %% ─── NETWORK_READY ───
+    state NETWORK_READY {
+        direction LR
+        ready1: Validate signal
+        ready2: Retrieve IP address
+        ready1 --> ready2
+    }
+    NETWORK_READY --> SUCCESS : Signal valid, IP obtained
+    NETWORK_READY --> CHECK_SERVICE_STATUS : Invalid signal / no IP
+
+    %% ─── OPERATOR_LIST_EXHAUSTED ───
+    state OPERATOR_LIST_EXHAUSTED {
+        direction TB
+        ex1: registrationFailCount_++
+        ex2: Check >= MAX_REGISTRATION_FAILURES (3)?
+        ex1 --> ex2
+    }
+    OPERATOR_LIST_EXHAUSTED --> CHECK_MODULE_READY : Under threshold:\nreset module, retry from index 0
+    OPERATOR_LIST_EXHAUSTED --> FAILED : Threshold reached:\nclear operator list,\nreset counter
+
+    %% ─── Terminal states ───
+    state SUCCESS {
+        direction LR
+        s1: Reset registrationFailCount_ = 0
+        s2: Save currentOperatorId_
+        s1 --> s2
+    }
+    SUCCESS --> [*]
+
+    state FAILED {
+        direction LR
+        f1: Persisted state read back\nby application for NVS save
+    }
+    FAILED --> [*]
+
+    %% ─── Operation timeout (outer while loop) ───
+    note right of FAILED
+        Any state can exit to FAILED
+        when operationTimeoutMs expires.
+        currentOperatorId_ = last attempted operator
+        registrationFailCount_ preserved as-is.
+        Both persisted to NVS by application.
+    end note
+
+    note right of CONFIGURE_MANUAL_NETWORK
+        On wake cycle resume:
+        setOperators() restores list,
+        currentOperatorId_, and
+        registrationFailCount_ from NVS.
+        Registration resumes from the
+        last attempted operator position.
+    end note
