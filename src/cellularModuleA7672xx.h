@@ -51,10 +51,13 @@ private:
     int accessTech;       // Access technology: 0=GSM, 2=UTRAN, 7=E-UTRAN(LTE)
   };
 
+  static constexpr uint32_t MAX_REGISTRATION_FAILURES = 3;
+
   // Operator selection for manual network registration
   std::vector<OperatorInfo> availableOperators_;  // Persisted operator list with IDs and access tech
   size_t currentOperatorIndex_ = 0;               // Track position in manual mode
   uint32_t currentOperatorId_ = 0;                // Current operator PLMN ID (saved successful operator)
+  uint32_t registrationFailCount_ = 0;            // Consecutive registration failures (persisted via setOperators)
 
 public:
   // Structure to hold detailed registration status
@@ -121,9 +124,11 @@ public:
   CellResult<CellularModule::UdpPacket> udpReceive(uint32_t timeout);
   CellResult<std::string> resolveDNS(const std::string &hostname);
   // Operator serialization/deserialization
-  bool setOperators(const std::string &serialized, uint32_t operatorId);
+  bool setOperators(const std::string &serialized, uint32_t operatorId,
+                    uint32_t registrationFailCount = 0);
   std::string getSerializedOperators() const;
   uint32_t getCurrentOperatorId() const;
+  uint32_t getRegistrationFailCount() const;
 
 private:
   const int DEFAULT_HTTP_CONNECT_TIMEOUT = 120; // seconds

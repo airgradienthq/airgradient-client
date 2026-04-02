@@ -105,6 +105,8 @@ public:
    */
   void setHttpDomain(const std::string &target);
   void setHttpDomainDefault();
+  void setCoapDomain(const std::string &target);
+  void setCoapDomainDefault();
   bool isClientReady();
   void setClientReady(bool isReady);
   void resetFetchConfigurationStatus();

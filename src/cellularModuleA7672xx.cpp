@@ -286,9 +286,6 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
   uint32_t manualOperatorStartTime = 0;  // Track time per operator in manual mode (60 sec timeout)
   uint32_t serviceStatusStartTime = 0;   // Track time in CHECK_SERVICE_STATUS (30 sec timeout)
 
-  // Track operator list exhaustion (full iterations through all operators)
-  uint32_t operatorListExhaustedCount = 0;
-  const uint32_t MAX_OPERATOR_LIST_EXHAUSTION = 3;
   const uint32_t SERVICE_STATUS_TIMEOUT = 30000;  // 30 seconds
 
   NetworkRegistrationState state = CHECK_MODULE_READY;
@@ -326,18 +323,19 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
 
     case OPERATOR_LIST_EXHAUSTED: {
       // All operators exhausted, increment exhaustion counter
-      operatorListExhaustedCount++;
+      registrationFailCount_++;
       AG_LOGW(TAG, "Operator list exhausted (attempt %" PRIu32 " of %" PRIu32 ")",
-              operatorListExhaustedCount, MAX_OPERATOR_LIST_EXHAUSTION);
+              registrationFailCount_, MAX_REGISTRATION_FAILURES);
 
-      if (operatorListExhaustedCount >= MAX_OPERATOR_LIST_EXHAUSTION) {
+      if (registrationFailCount_ >= MAX_REGISTRATION_FAILURES) {
         // Reached maximum exhaustion attempts, fail registration
         AG_LOGE(TAG, "Failed after %" PRIu32 " full iterations through operator list",
-                MAX_OPERATOR_LIST_EXHAUSTION);
-        // Clear operator list and saved operator
+                registrationFailCount_);
+        // Clear operator list and saved operator, reset fail counter
         availableOperators_.clear();
         currentOperatorId_ = 0;
         currentOperatorIndex_ = 0;
+        registrationFailCount_ = 0;
         finish = true;
         continue;
       }
@@ -397,9 +395,13 @@ CellularModuleA7672XX::startNetworkRegistration(CellTechnology ct, const std::st
   }
 
   if (state != NETWORK_READY) {
-    AG_LOGW(TAG, "Network registration failed! Final state: %d", state);
+    AG_LOGW(TAG, "Network registration failed! Final state: %d (fail count: %" PRIu32 " of %" PRIu32 ")",
+            state, registrationFailCount_, MAX_REGISTRATION_FAILURES);
     return result;
   }
+
+  // Registration succeeded, reset fail counter
+  registrationFailCount_ = 0;
 
   AG_LOGI(TAG, "Warming up for %" PRIu32 "ms...", _warmUpTimeMs);
   DELAY_MS(_warmUpTimeMs);
@@ -1146,7 +1148,6 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
       AG_LOGW(TAG,
               "This operator %" PRIu32 " has really low signal %d (csq), moving on..",
               currentOperatorId_, signal);
-      currentOperatorId_ = 0; // Clear saved operator
       currentOperatorIndex_++;
       REGIS_RETRY_DELAY();
       return CONFIGURE_MANUAL_NETWORK;
@@ -1181,7 +1182,6 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
     // Still denied/emergency after confirmation period
     if (stat == 3 || stat == 11) {
       AG_LOGW(TAG, "Registration still denied/emergency (status=%d) after 10s, trying next operator", stat);
-      currentOperatorId_ = 0;  // Clear saved operator
       currentOperatorIndex_++;
       return CONFIGURE_MANUAL_NETWORK;
     }
@@ -1190,7 +1190,6 @@ CellularModuleA7672XX::_implCheckNetworkRegistration(CellTechnology ct,
   // Not registered, check timeout
   if ((MILLIS() - manualOperatorStartTime) > TIMEOUT_WAIT_REGISTERED) {
     AG_LOGW(TAG, "Not registered with current operator after 60 seconds, trying next");
-    currentOperatorId_ = 0;  // Clear saved operator
     currentOperatorIndex_++;
     return CONFIGURE_MANUAL_NETWORK;
   }
@@ -1285,6 +1284,7 @@ CellularModuleA7672XX::_implConfigureManualNetwork() {
   }
 
   OperatorInfo opInfo = availableOperators_[currentOperatorIndex_];
+  currentOperatorId_ = opInfo.operatorId;  // Track last attempted operator for persistence
   AG_LOGI(TAG, "Configuring manual operator: %" PRIu32 " with AcT: %d (index %zu of %zu)",
           opInfo.operatorId, opInfo.accessTech, currentOperatorIndex_ + 1, availableOperators_.size());
   DELAY_MS(5000);
@@ -2182,9 +2182,12 @@ int CellularModuleA7672XX::_calculateResponseTimeout(int connectionTimeout, int 
   return waitActionTimeout;
 }
 
-bool CellularModuleA7672XX::setOperators(const std::string &serialized, uint32_t operatorId) {
-  AG_LOGI(TAG, "Setting operators from serialized string: %s, current operatorId: %" PRIu32,
-          serialized.c_str(), operatorId);
+bool CellularModuleA7672XX::setOperators(const std::string &serialized, uint32_t operatorId,
+                                         uint32_t registrationFailCount) {
+  AG_LOGI(TAG, "Setting operators from serialized string: %s, current operatorId: %" PRIu32
+          ", failCount: %" PRIu32,
+          serialized.c_str(), operatorId, registrationFailCount);
+  registrationFailCount_ = registrationFailCount;
 
   // Clear existing operators
   availableOperators_.clear();
@@ -2281,6 +2284,10 @@ std::string CellularModuleA7672XX::getSerializedOperators() const {
 
 uint32_t CellularModuleA7672XX::getCurrentOperatorId() const {
   return currentOperatorId_;
+}
+
+uint32_t CellularModuleA7672XX::getRegistrationFailCount() const {
+  return registrationFailCount_;
 }
 
 #endif // ESP8266
