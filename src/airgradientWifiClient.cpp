@@ -155,35 +155,27 @@ bool AirgradientWifiClient::_httpGet(const std::string &url, int &responseCode,
   }
   const char *host = httpDomain.c_str();
 
-  // Phase 1: try each resolved IP with sticky-failover semantics.
-  bool tryIpPath = selectorReady_ && selector_.count() > 0;
-  if (tryIpPath) {
-    const uint8_t MAX_LOOPS = static_cast<uint8_t>(selector_.count() + 1);
-    for (uint8_t loop = 0; loop < MAX_LOOPS; ++loop) {
-      if (selector_.exhausted()) {
-        break;
-      }
+  // Phase 1: try every resolved IP exactly once, in cursor order. The
+  // cursor stays put on success (sticky) and advances on failure.
+  bool ipsExhausted = false;
+  if (selectorReady_ && selector_.count() > 0) {
+    const uint8_t total = selector_.count();
+    for (uint8_t i = 0; i < total; ++i) {
       IPAddress ip = selector_.current();
       if (_httpGetSecure(ip, host, path, responseCode, responseBody)) {
-        selector_.markSuccess();
         return true;
       }
-      bool failedOver = selector_.markFailed();
-      if (!failedOver) {
-        // Below threshold: don't hammer this IP; fall through to hostname.
-        break;
-      }
-      // Threshold tripped; retry the newly-selected IP immediately.
+      selector_.advance();
     }
-    AG_LOGW(TAG, "IP-based path failed; falling back to hostname resolution");
+    ipsExhausted = true;
+    AG_LOGW(TAG, "All %u IP(s) failed; falling back to hostname resolution", total);
   }
 
   // Phase 2: hostname fallback. Same WiFiClientSecure + HTTPClient API,
   // just let WiFiClientSecure do its own DNS resolution.
-  bool wasExhausted = selectorReady_ && selector_.exhausted();
   if (_httpGetSecure(IPAddress(static_cast<uint32_t>(0)), host, path,
                      responseCode, responseBody)) {
-    if (wasExhausted) {
+    if (ipsExhausted) {
       AG_LOGI(TAG, "Hostname fallback succeeded after IP exhaustion; refreshing DNS");
       selector_.refresh();
     }
@@ -235,32 +227,26 @@ bool AirgradientWifiClient::_httpPost(const std::string &url, const std::string 
   }
   const char *host = httpDomain.c_str();
 
-  // Phase 1: try each resolved IP with sticky-failover semantics.
-  bool tryIpPath = selectorReady_ && selector_.count() > 0;
-  if (tryIpPath) {
-    const uint8_t MAX_LOOPS = static_cast<uint8_t>(selector_.count() + 1);
-    for (uint8_t loop = 0; loop < MAX_LOOPS; ++loop) {
-      if (selector_.exhausted()) {
-        break;
-      }
+  // Phase 1: try every resolved IP exactly once, in cursor order. The
+  // cursor stays put on success (sticky) and advances on failure.
+  bool ipsExhausted = false;
+  if (selectorReady_ && selector_.count() > 0) {
+    const uint8_t total = selector_.count();
+    for (uint8_t i = 0; i < total; ++i) {
       IPAddress ip = selector_.current();
       if (_httpPostSecure(ip, host, path, payload, responseCode)) {
-        selector_.markSuccess();
         return true;
       }
-      bool failedOver = selector_.markFailed();
-      if (!failedOver) {
-        break;
-      }
+      selector_.advance();
     }
-    AG_LOGW(TAG, "IP-based path failed; falling back to hostname resolution");
+    ipsExhausted = true;
+    AG_LOGW(TAG, "All %u IP(s) failed; falling back to hostname resolution", total);
   }
 
   // Phase 2: hostname fallback via the same WiFiClientSecure API.
-  bool wasExhausted = selectorReady_ && selector_.exhausted();
   if (_httpPostSecure(IPAddress(static_cast<uint32_t>(0)), host, path, payload,
                       responseCode)) {
-    if (wasExhausted) {
+    if (ipsExhausted) {
       AG_LOGI(TAG, "Hostname fallback succeeded after IP exhaustion; refreshing DNS");
       selector_.refresh();
     }

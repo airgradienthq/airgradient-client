@@ -18,17 +18,20 @@
  * EndpointSelector
  *
  * Owns a small list of resolved IPv4 A records for a single hostname and
- * implements sticky-with-failover selection across them:
- *  - On begin(): resolve all unique IPs, random shuffle, pick index 0.
- *  - Stay on the current IP while it works (caller calls markSuccess()).
- *  - On caller's markFailed(): increment consecutive-failure counter.
- *    After FAILURE_THRESHOLD failures in a row, advance to the next IP.
- *  - exhausted() becomes true after every IP has been tried since the
- *    last success; caller should then take a fallback path
- *    (e.g. classic hostname-based HTTPClient).
+ * exposes a sticky cursor over them. Selection semantics:
+ *  - On begin(): resolve all unique IPs, random shuffle, point cursor at
+ *    index 0.
+ *  - current() returns the IP the cursor points at; stays put across
+ *    successful requests (sticky-per-boot behavior).
+ *  - advance() moves the cursor to the next IP, wrapping at the end.
+ *    The caller drives the failover loop and decides when to stop.
  *  - maybeRefresh() re-resolves DNS on a long interval (default 1h),
  *    preserving the currently-active IP if it is still present in the
  *    new list.
+ *
+ * The selector intentionally has no notion of "failure threshold" or
+ * "exhaustion" - the caller is expected to attempt every IP at most once
+ * per request and then fall back to hostname-based resolution.
  *
  * Multi-A-record resolution is performed by sending a single raw UDP
  * DNS query (type A) directly to the system's configured DNS server
@@ -41,7 +44,6 @@
 class EndpointSelector {
 public:
   static constexpr uint8_t MAX_IPS = 8;
-  static constexpr uint8_t FAILURE_THRESHOLD = 2;
   static constexpr uint32_t REFRESH_INTERVAL_MS = 60UL * 60UL * 1000UL; // 1 hour
 
   EndpointSelector() = default;
@@ -68,20 +70,10 @@ public:
   uint8_t count() const { return count_; }
 
   /**
-   * True if every IP has been tried at least once without success
-   * since the last markSuccess()/refresh().
+   * Advance the cursor to the next IP in the shuffled list, wrapping
+   * around to index 0 after the last entry. No-op if count() == 0.
    */
-  bool exhausted() const { return exhausted_; }
-
-  /** Report that a request via the current IP succeeded. */
-  void markSuccess();
-
-  /**
-   * Report a transport/TLS failure on the current IP.
-   * @return true if the failure threshold tripped and we advanced
-   *         to the next IP, false otherwise.
-   */
-  bool markFailed();
+  void advance();
 
   /**
    * Re-resolve at most once every REFRESH_INTERVAL_MS. The active IP is
@@ -98,9 +90,6 @@ private:
   IPAddress ips_[MAX_IPS];
   uint8_t count_ = 0;
   uint8_t currentIdx_ = 0;
-  uint8_t consecutiveFailures_ = 0;
-  uint8_t triedCount_ = 0;
-  bool exhausted_ = false;
   uint32_t lastRefreshMs_ = 0;
 
   /** Multi-A-record resolution via raw UDP DNS query. */
@@ -116,8 +105,6 @@ private:
 
   bool resolveAndStore_();
   void shuffle_();
-  void resetFailureTracking_();
-  void advanceToNext_();
   void logState_(const char *header) const;
 };
 

@@ -47,7 +47,6 @@ bool EndpointSelector::begin(const char *hostname) {
   }
   shuffle_();
   currentIdx_ = 0;
-  resetFailureTracking_();
   lastRefreshMs_ = MILLIS();
   logState_("ready");
   return true;
@@ -60,27 +59,15 @@ IPAddress EndpointSelector::current() const {
   return ips_[currentIdx_];
 }
 
-void EndpointSelector::markSuccess() {
-  if (consecutiveFailures_ > 0 || triedCount_ > 0) {
-    AG_LOGI(TAG, "Success on %s, clearing failure state",
-            current().toString().c_str());
-  }
-  resetFailureTracking_();
-}
-
-bool EndpointSelector::markFailed() {
+void EndpointSelector::advance() {
   if (count_ == 0) {
-    return false;
+    return;
   }
-  consecutiveFailures_++;
-  AG_LOGW(TAG, "Failure on %s (consecutive=%u/%u)",
-          ips_[currentIdx_].toString().c_str(), consecutiveFailures_,
-          FAILURE_THRESHOLD);
-  if (consecutiveFailures_ >= FAILURE_THRESHOLD) {
-    advanceToNext_();
-    return true;
-  }
-  return false;
+  uint8_t prevIdx = currentIdx_;
+  currentIdx_ = (currentIdx_ + 1) % count_;
+  AG_LOGW(TAG, "Advance %s -> %s (idx %u -> %u)",
+          ips_[prevIdx].toString().c_str(),
+          ips_[currentIdx_].toString().c_str(), prevIdx, currentIdx_);
 }
 
 bool EndpointSelector::maybeRefresh(uint32_t nowMs) {
@@ -137,7 +124,6 @@ bool EndpointSelector::refresh() {
     AG_LOGW(TAG, "Previously active IP %s no longer in DNS",
             active.toString().c_str());
   }
-  resetFailureTracking_();
   lastRefreshMs_ = MILLIS();
   logState_("after-refresh");
   return true;
@@ -445,30 +431,10 @@ void EndpointSelector::shuffle_() {
   }
 }
 
-void EndpointSelector::resetFailureTracking_() {
-  consecutiveFailures_ = 0;
-  triedCount_ = 0;
-  exhausted_ = false;
-}
-
-void EndpointSelector::advanceToNext_() {
-  triedCount_++;
-  consecutiveFailures_ = 0;
-  if (triedCount_ >= count_) {
-    exhausted_ = true;
-    AG_LOGE(TAG, "All IPs exhausted since last success");
-  }
-  currentIdx_ = (currentIdx_ + 1) % count_;
-  AG_LOGW(TAG, "Failover -> %s (idx=%u, tried=%u/%u)",
-          ips_[currentIdx_].toString().c_str(), currentIdx_, triedCount_,
-          count_);
-}
-
 void EndpointSelector::logState_(const char *header) const {
-  AG_LOGI(TAG, "State[%s] host=%s count=%u current=%u(%s) exhausted=%d",
-          header, hostname_, count_, currentIdx_,
-          count_ > 0 ? ips_[currentIdx_].toString().c_str() : "none",
-          exhausted_ ? 1 : 0);
+  AG_LOGI(TAG, "State[%s] host=%s count=%u current=%u(%s)", header, hostname_,
+          count_, currentIdx_,
+          count_ > 0 ? ips_[currentIdx_].toString().c_str() : "none");
 }
 
 #endif // ARDUINO
